@@ -94,7 +94,7 @@ it never reads the facet in that case.
 
 These were written from Microsoft's documented shapes, not recorded from a tenant, so anything they get
 wrong is wrong in the connector's tests too, and the tests would agree with the mock while both were wrong
-about the same thing. That is `aborroy/content-lake-app#142`. What follows is the runbook for closing it.
+about the same thing. That is `AlfrescoLabs/content-lake-app#142`. What follows is the runbook for closing it.
 
 It needs **no app registration**, which matters because that is what is blocked: the tenant used for
 development has "Register applications" set to No, and the Azure CLI's borrowed Graph token carries no files

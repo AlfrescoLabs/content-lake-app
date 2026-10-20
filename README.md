@@ -17,10 +17,10 @@ Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo
 
 | Repo | Role |
 |---|---|
-| **[content-lake-app](https://github.com/aborroy/content-lake-app)** | Java ingestion pipeline and RAG service (this repo) |
-| [content-lake-app-deployment](https://github.com/aborroy/content-lake-app-deployment) | Docker Compose stack that wires everything together -- **start here to run the full stack** |
-| [alfresco-content-lake-ui](https://github.com/aborroy/alfresco-content-lake-ui) | ACA/ADW extension: semantic search + RAG chat sidebar |
-| [content-lake-app-ui](https://github.com/aborroy/content-lake-app-ui) | Standalone demo UI (Alfresco + Nuxeo dual auth) |
+| **[content-lake-app](https://github.com/AlfrescoLabs/content-lake-app)** | Java ingestion pipeline and RAG service (this repo) |
+| [content-lake-app-deployment](https://github.com/AlfrescoLabs/content-lake-app-deployment) | Docker Compose stack that wires everything together -- **start here to run the full stack** |
+| [alfresco-content-lake-ui](https://github.com/AlfrescoLabs/alfresco-content-lake-ui) | ACA/ADW extension: semantic search + RAG chat sidebar |
+| [content-lake-app-ui](https://github.com/AlfrescoLabs/content-lake-app-ui) | Standalone demo UI (Alfresco + Nuxeo dual auth) |
 | [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) | Local Nuxeo + PostgreSQL stack (required for Nuxeo profiles) |
 
 ## Documentation
@@ -145,7 +145,7 @@ loads them at runtime.
 
 ```bash
 # Clone repository
-git clone https://github.com/aborroy/content-lake-app.git
+git clone https://github.com/AlfrescoLabs/content-lake-app.git
 cd content-lake-app
 
 # Build all modules
@@ -284,7 +284,7 @@ export EMBEDDING_CHUNK_OVERLAP=120
 ## Nuxeo Backfill And Live Sync
 
 The Nuxeo stack is deployed from the
-[content-lake-app-deployment](https://github.com/aborroy/content-lake-app-deployment) companion
+[content-lake-app-deployment](https://github.com/AlfrescoLabs/content-lake-app-deployment) companion
 project, which owns every compose file for this project. It starts both the `nuxeo-batch-ingester`
 and the `nuxeo-live-ingester`, and brings up the Nuxeo server and its database from
 [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) automatically.
