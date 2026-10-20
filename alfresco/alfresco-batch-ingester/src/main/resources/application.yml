@@ -98,7 +98,7 @@ hxpr:
   # Optional override for the repository-id segment in that hierarchy.
   # If empty, uses Alfresco Discovery repository ID.
   path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
-  # HTTP Basic credentials for the ai-ready-index engine (filestore user store).
+  # HTTP Basic credentials for the Hyland OpenArch engine (filestore user store).
   username: ${HXPR_USERNAME:admin}
   password: ${HXPR_PASSWORD:password}
 

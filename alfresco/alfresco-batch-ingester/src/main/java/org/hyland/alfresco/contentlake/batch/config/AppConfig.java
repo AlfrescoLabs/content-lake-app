@@ -227,7 +227,7 @@ public class AppConfig {
     // Helpers
     // ----------------------------------------------------------------------
 
-    // Package-visible for unit testing (see AppConfigTest). Basic auth against the ai-ready-index engine.
+    // Package-visible for unit testing (see AppConfigTest). Basic auth against the Hyland OpenArch engine.
 
     static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props) {
         return (request, body, execution) -> {

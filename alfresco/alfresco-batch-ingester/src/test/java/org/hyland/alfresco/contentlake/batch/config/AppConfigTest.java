@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Verifies the outbound engine auth interceptor sets HTTP Basic credentials and the
- * {@code HXCS-REPOSITORY} header (ai-ready-index community engine, Basic-auth mode).
+ * {@code HXCS-REPOSITORY} header (Hyland OpenArch engine, Basic-auth mode).
  */
 class AppConfigTest {
 

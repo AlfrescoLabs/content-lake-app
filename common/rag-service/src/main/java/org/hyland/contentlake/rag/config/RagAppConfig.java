@@ -245,7 +245,7 @@ public class RagAppConfig {
         private String url = "http://localhost:8080";
         private String repositoryId = "default";
 
-        /** HTTP Basic credentials for the ai-ready-index engine (filestore user store). */
+        /** HTTP Basic credentials for the Hyland OpenArch engine (filestore user store). */
         private String username;
         private String password;
     }

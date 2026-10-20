@@ -6,14 +6,15 @@
 [![Maven](https://img.shields.io/badge/Maven-3.9+-red.svg)](https://maven.apache.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://docs.docker.com/compose/)
 [![Status](https://img.shields.io/badge/Status-PoC-yellow.svg)]()
+[![Built on Hyland OpenArch](https://img.shields.io/badge/Built%20on-Hyland%20OpenArch-0b5394.svg)](https://github.com/Hyland/OpenArch)
 
-**AI-powered semantic search and RAG over Alfresco and Nuxeo content using hxpr**
+**AI-powered semantic search and RAG over Alfresco and Nuxeo content using [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr)**
 
 [Features](#features) | [Quick Start](#quick-start) | [Architecture](#architecture) | [Authentication](#authentication) | [API Usage](#api-usage) | [Configuration](#configuration)
 
 ## Content Lake Ecosystem
 
-Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into the [ai-ready-index](https://github.com/Hyland/ai-ready-index) engine for hybrid semantic search and RAG.
+Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into the [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr) engine for hybrid semantic search and RAG.
 
 | Repo | Role |
 |---|---|
@@ -236,7 +237,7 @@ export ALFRESCO_URL=http://localhost:8080
 export ALFRESCO_INTERNAL_USERNAME=admin
 export ALFRESCO_INTERNAL_PASSWORD=admin
 
-# ai-ready-index engine (HTTP Basic auth)
+# Hyland OpenArch (hxpr) engine (HTTP Basic auth)
 export HXPR_URL=http://localhost:8080
 export HXPR_REPOSITORY_ID=default
 export HXPR_USERNAME=admin
@@ -533,5 +534,5 @@ Contributions welcome! Please:
 
 - Built with [Spring AI](https://spring.io/projects/spring-ai)
 - Uses [Alfresco Java SDK](https://github.com/Alfresco/alfresco-java-sdk)
-- Powered by [hxpr Content Lake](https://www.hyland.com/)
+- Powered by [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr)
 - Created for the Alfresco/Hyland community

@@ -87,7 +87,7 @@ hxpr:
   repository-id: ${HXPR_REPOSITORY_ID:default}
   target-path: ${HXPR_TARGET_PATH:/nuxeo-sync}
   path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
-  # HTTP Basic credentials for the ai-ready-index engine (filestore user store).
+  # HTTP Basic credentials for the Hyland OpenArch engine (filestore user store).
   username: ${HXPR_USERNAME:admin}
   password: ${HXPR_PASSWORD:password}
 
