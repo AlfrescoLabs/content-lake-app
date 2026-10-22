@@ -337,6 +337,50 @@ On an incremental pass a changed document the `ScopeResolver` rejects becomes an
 rather than being ignored. From the index's side, a node leaving scope and a node being removed are the same
 thing, and with the sweep suspended the feed is the only mechanism that could notice either.
 
+## Two Repositories of One Type
+
+Two Alfresco repositories, or two Nuxeo repositories, can write to one hxpr. Two things must hold.
+
+**Each repository has its own source id.** The source id is the second half of `cin_sourceId`, part of the
+hxpr path and the namespace of every ACL principal. Two repositories with the same source id overwrite each
+other's documents, because `findByNodeId(cin_id, cin_sourceId)` finds the other's document, and each
+reconciliation sweep deletes what the other ingested.
+
+| Source | Setting | Default |
+|---|---|---|
+| Alfresco | `ALFRESCO_SOURCE_ID` (`content.lake.source-id`) on both ingesters | The Discovery API repository id |
+| Nuxeo | `NUXEO_SOURCE_ID` (`nuxeo.source-id`) | `local` |
+
+The Alfresco default is unique for two separate installations. It is not unique for a repository restored
+from another's volumes, which keeps the repository id: set `ALFRESCO_SOURCE_ID` on one of them. Use the same
+value on the batch and the live ingester of one repository. `HXPR_PATH_REPOSITORY_ID` changes only the path,
+not `cin_sourceId`, so it does not separate two repositories. The Nuxeo live ingester logs a warning at
+startup while `NUXEO_SOURCE_ID` is the default. Changing a source id on an existing index is a re-ingestion:
+documents under the old id are not found under the new one, so delete them and run a full sync.
+
+**Each repository's messages reach only its own ingesters.** The simplest setup is one broker per
+repository, or distinct topic and queue names (`ALFRESCO_EVENT_TOPIC`,
+`CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME`). On a shared broker the ingesters also tell the repositories
+apart by repository id:
+
+- The live ingester drops an Event2 event whose `source` (`/<repositoryId>`) is not its own repository, with
+  a debug log.
+- The repository module puts `repositoryId` on each ACL change message, as a JMS property and in the JSON
+  body. The batch ingester listens with the selector `repositoryId IS NULL OR repositoryId = '<own id>'`,
+  so another repository's message stays on the queue for its own ingester. A message without
+  `repositoryId`, from an older repository module, is taken by any batch ingester, which is correct with
+  one Alfresco only. The listener starts once the repository id is known, retrying every
+  `CONTENT_LAKE_PERMISSION_SYNC_START_RETRY_INTERVAL_MS` (5000) while the repository is not reachable.
+
+This filtering compares the repository's own id, not `ALFRESCO_SOURCE_ID`. A restored copy has the same
+repository id as its original, so it needs its own broker, or its own topic and queue names.
+
+Each Nuxeo live ingester keeps its audit position in `<NUXEO_LIVE_AUDIT_CURSOR_DIR>/audit-cursor-<source
+id>.json` (`/data` by default), so two of them can share one volume. Each write goes to a temporary file that
+is renamed into place. A set `NUXEO_LIVE_AUDIT_CURSOR_FILE` is used as given, and two ingesters must not set
+the same one. On the first start after an upgrade, the shared `audit-cursor.json` in the same directory is
+read once for this source, and its position is copied into the new file.
+
 ## Reconciliation Sweep
 
 Deletion otherwise depends entirely on a delete event arriving. With the live ingester down, a dropped

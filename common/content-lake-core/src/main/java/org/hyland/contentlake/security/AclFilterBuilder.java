@@ -98,6 +98,22 @@ public final class AclFilterBuilder {
         return raclEquals(EVERYONE_PRINCIPAL);
     }
 
+    /**
+     * The Everyone principal, bound to one source.
+     *
+     * <p>{@code __Everyone__} is stored un-namespaced, so on its own it matches every source's public
+     * documents. Inside a source's clause it must match that source's only: otherwise a caller with a clause
+     * for any one source reads the public documents of every source, including one they hold no identity
+     * for and one dropped by {@code fail-closed}. Both the qualified and the legacy bare {@code cin_sourceId}
+     * are matched, so documents ingested before #20 keep their visibility.</p>
+     */
+    public static String sourceEveryoneClause(String sourceId, String qualifiedSourceId) {
+        String sources = qualifiedSourceId == null || qualifiedSourceId.equals(sourceId)
+                ? sourceIdClause(sourceId)
+                : "(" + sourceIdClause(qualifiedSourceId) + " OR " + sourceIdClause(sourceId) + ")";
+        return "(" + everyoneClause() + " AND " + sources + ")";
+    }
+
     /** Matches every document of one source, bypassing {@code sys_racl} entirely. */
     public static String sourceIdClause(String qualifiedSourceId) {
         return SOURCE_ID_FIELD + " = '" + escapeLiteral(qualifiedSourceId) + "'";
@@ -137,7 +153,7 @@ public final class AclFilterBuilder {
         }
 
         List<String> raclClauses = new ArrayList<>();
-        raclClauses.add(everyoneClause());
+        raclClauses.add(sourceEveryoneClause(sourceId, qualifiedSourceId));
         for (String authority : authorities) {
             // GROUP_EVERYONE is already covered by the un-namespaced Everyone principal above, and it
             // is never stored in its namespaced form.

@@ -1,10 +1,11 @@
 package org.hyland.contentlake.rag.security;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.security.CallerAuthenticator;
 import org.hyland.contentlake.security.CallerCredentials;
 import org.hyland.contentlake.security.CallerIdentities;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,10 +17,22 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class NuxeoPasswordCallerAuthenticator implements CallerAuthenticator {
 
     private final NuxeoDirectory directory;
+
+    /** Asks every repository of the type when it has several (#183). Null keeps the single-repository path. */
+    private final SourceCredentialChecker checker;
+
+    public NuxeoPasswordCallerAuthenticator(NuxeoDirectory directory) {
+        this(directory, null);
+    }
+
+    @Autowired
+    public NuxeoPasswordCallerAuthenticator(NuxeoDirectory directory, SourceCredentialChecker checker) {
+        this.directory = directory;
+        this.checker = checker;
+    }
 
     @Override
     public String id() {
@@ -38,6 +51,9 @@ public class NuxeoPasswordCallerAuthenticator implements CallerAuthenticator {
 
     @Override
     public CallerIdentities authenticate(CallerCredentials credentials) {
+        if (checker != null && checker.checksPerSource(SourceRegistry.NUXEO)) {
+            return checker.password(SourceRegistry.NUXEO, credentials.principal(), credentials.password());
+        }
         if (!directory.authenticate(credentials.principal(), credentials.password())) {
             return null;
         }

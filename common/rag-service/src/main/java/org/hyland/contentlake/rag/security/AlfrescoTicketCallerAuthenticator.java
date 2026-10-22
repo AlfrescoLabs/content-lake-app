@@ -1,10 +1,11 @@
 package org.hyland.contentlake.rag.security;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.security.CallerAuthenticator;
 import org.hyland.contentlake.security.CallerCredentials;
 import org.hyland.contentlake.security.CallerIdentities;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Component;
 
@@ -19,10 +20,22 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AlfrescoTicketCallerAuthenticator implements CallerAuthenticator {
 
     private final AlfrescoDirectory directory;
+
+    /** Asks every repository of the type when it has several (#183). Null keeps the single-repository path. */
+    private final SourceCredentialChecker checker;
+
+    public AlfrescoTicketCallerAuthenticator(AlfrescoDirectory directory) {
+        this(directory, null);
+    }
+
+    @Autowired
+    public AlfrescoTicketCallerAuthenticator(AlfrescoDirectory directory, SourceCredentialChecker checker) {
+        this.directory = directory;
+        this.checker = checker;
+    }
 
     @Override
     public String id() {
@@ -42,6 +55,14 @@ public class AlfrescoTicketCallerAuthenticator implements CallerAuthenticator {
     @Override
     public CallerIdentities authenticate(CallerCredentials credentials) {
         String ticket = credentials.principal();
+        if (checker != null && checker.checksPerSource(SourceRegistry.ALFRESCO)) {
+            CallerIdentities identities = checker.token(SourceRegistry.ALFRESCO, ticket);
+            if (identities != null) {
+                return identities;
+            }
+            log.warn("Alfresco ticket validation failed for '{}' in every Alfresco source", truncated(ticket));
+            throw new BadCredentialsException("Invalid or expired Alfresco ticket");
+        }
         String resolvedUsername = directory.validateTicket(ticket);
         if (resolvedUsername != null) {
             log.debug("Authenticated Alfresco ticket '{}' as '{}'", truncated(ticket), resolvedUsername);

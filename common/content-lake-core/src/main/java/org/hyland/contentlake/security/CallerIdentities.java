@@ -3,6 +3,7 @@ package org.hyland.contentlake.security;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,20 +36,33 @@ import java.util.Set;
  * reads on it. So a single identity must keep describing itself as the bare {@code alice}: typing it as
  * {@code alfresco:alice} would re-bucket live callers' rate limits and orphan every feedback row its author
  * had already stored. Do not "tidy" this into a uniform {@code type:user} form.</p>
+ *
+ * <h3>Identities scoped to one source</h3>
+ *
+ * <p>With two repositories of one type, a login proven against one says nothing about the other. A
+ * {@linkplain SourceIdentity#isScoped() scoped} identity answers for its own source id only, and once a
+ * caller holds any scoped identity of a type, a source of that type it does not name gets no name at all:
+ * neither the type identity nor the fallback answers for it. That is what stops a name checked against
+ * repository A from being applied, unchecked, to repository B (#182).</p>
  */
 public final class CallerIdentities {
 
     /** No identities at all: an authenticator declining, not a caller with nothing. */
-    public static final CallerIdentities EMPTY = new CallerIdentities(null, Map.of());
+    public static final CallerIdentities EMPTY = new CallerIdentities(null, Map.of(), Map.of());
 
     private final SourceIdentity fallback;
 
     /** Typed identities by source type, insertion-ordered. Includes the fallback when it is typed. */
     private final Map<String, SourceIdentity> byType;
 
-    private CallerIdentities(SourceIdentity fallback, Map<String, SourceIdentity> byType) {
+    /** Identities scoped to one source, by bare source id, insertion-ordered. */
+    private final Map<String, SourceIdentity> bySource;
+
+    private CallerIdentities(SourceIdentity fallback, Map<String, SourceIdentity> byType,
+                             Map<String, SourceIdentity> bySource) {
         this.fallback = fallback;
         this.byType = byType;
+        this.bySource = bySource;
     }
 
     /**
@@ -73,7 +87,8 @@ public final class CallerIdentities {
         if (fallback != null) {
             return fallback;
         }
-        return byType.values().stream().findFirst().orElse(null);
+        return byType.values().stream().findFirst()
+                .or(() -> bySource.values().stream().findFirst()).orElse(null);
     }
 
     public String primaryUsername() {
@@ -89,8 +104,29 @@ public final class CallerIdentities {
      *         filter rather than widened, which is the fail-closed direction.
      */
     public String usernameFor(String sourceType) {
-        if (sourceType != null && !sourceType.isBlank()) {
-            SourceIdentity typed = byType.get(sourceType.trim().toLowerCase(Locale.ROOT));
+        return usernameFor(null, sourceType);
+    }
+
+    /**
+     * The caller's username in one source.
+     *
+     * @return the identity scoped to {@code sourceId}; else {@code null} when the caller holds scoped
+     *         identities of this type but none for this source, because the type was checked source by source
+     *         and this one did not accept the caller; else the answer of {@link #usernameFor(String)}.
+     */
+    public String usernameFor(String sourceId, String sourceType) {
+        if (sourceId != null && !sourceId.isBlank()) {
+            SourceIdentity scoped = bySource.get(sourceId.trim());
+            if (scoped != null) {
+                return scoped.username();
+            }
+        }
+        String type = sourceType == null || sourceType.isBlank() ? null : sourceType.trim().toLowerCase(Locale.ROOT);
+        if (type != null) {
+            if (bySource.values().stream().anyMatch(identity -> type.equals(identity.sourceType()))) {
+                return null;
+            }
+            SourceIdentity typed = byType.get(type);
             if (typed != null) {
                 return typed.username();
             }
@@ -109,15 +145,23 @@ public final class CallerIdentities {
                 all.add(identity);
             }
         }
+        all.addAll(bySource.values());
         return List.copyOf(all);
     }
 
     public Set<String> sourceTypes() {
-        return byType.keySet();
+        Set<String> types = new LinkedHashSet<>(byType.keySet());
+        bySource.values().forEach(identity -> types.add(identity.sourceType()));
+        return Collections.unmodifiableSet(types);
+    }
+
+    /** The bare source ids the caller holds a scoped identity for, in the order they were added. */
+    public Set<String> sourceIds() {
+        return bySource.keySet();
     }
 
     public boolean isEmpty() {
-        return fallback == null && byType.isEmpty();
+        return fallback == null && byType.isEmpty() && bySource.isEmpty();
     }
 
     public int size() {
@@ -132,7 +176,13 @@ public final class CallerIdentities {
      * replaces produced. See the class note on why neither form may change.</p>
      */
     public String describe() {
-        List<SourceIdentity> all = all();
+        // A scoped identity under the fallback's own name is the same person checked in one more place. Left
+        // out here, so adding a second repository does not re-bucket rate limits or re-key stored feedback.
+        // scopeKey() keeps it, because it changes what the caller may read.
+        List<SourceIdentity> all = all().stream()
+                .filter(identity -> !identity.isScoped() || fallback == null
+                        || !identity.username().equals(fallback.username()))
+                .toList();
         if (all.isEmpty()) {
             return "";
         }
@@ -146,6 +196,9 @@ public final class CallerIdentities {
             }
             if (!identity.isUntyped()) {
                 described.append(identity.sourceType()).append(':');
+            }
+            if (identity.isScoped()) {
+                described.append(identity.sourceId()).append(':');
             }
             described.append(identity.username());
         }
@@ -164,8 +217,12 @@ public final class CallerIdentities {
         StringBuilder key = new StringBuilder();
         for (SourceIdentity identity : all()) {
             String type = identity.isUntyped() ? "" : identity.sourceType();
-            key.append(type.length()).append(':').append(type)
-                    .append(identity.username().length()).append(':').append(identity.username());
+            key.append(type.length()).append(':').append(type);
+            if (identity.isScoped()) {
+                // Only scoped identities add this part, so a key without them is unchanged.
+                key.append('@').append(identity.sourceId().length()).append(':').append(identity.sourceId());
+            }
+            key.append(identity.username().length()).append(':').append(identity.username());
         }
         return key.toString();
     }
@@ -178,12 +235,13 @@ public final class CallerIdentities {
         if (!(other instanceof CallerIdentities that)) {
             return false;
         }
-        return Objects.equals(fallback, that.fallback) && byType.equals(that.byType);
+        return Objects.equals(fallback, that.fallback) && byType.equals(that.byType)
+                && bySource.equals(that.bySource);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fallback, byType);
+        return Objects.hash(fallback, byType, bySource);
     }
 
     @Override
@@ -195,6 +253,7 @@ public final class CallerIdentities {
 
         private SourceIdentity fallback;
         private final Map<String, SourceIdentity> byType = new LinkedHashMap<>();
+        private final Map<String, SourceIdentity> bySource = new LinkedHashMap<>();
 
         /**
          * The identity answering for any source type nothing else claims. At most one.
@@ -212,6 +271,10 @@ public final class CallerIdentities {
                 throw new IllegalStateException(
                         "A caller has at most one fallback identity; already set to " + fallback);
             }
+            if (identity.isScoped()) {
+                throw new IllegalArgumentException(
+                        "An identity scoped to one source answers for that source only, so it cannot be the fallback");
+            }
             fallback = identity;
             if (!identity.isUntyped()) {
                 register(identity);
@@ -219,7 +282,7 @@ public final class CallerIdentities {
             return this;
         }
 
-        /** An identity answering for its own source type only. */
+        /** An identity answering for its own source type, or for its own source when it is scoped. */
         public Builder add(SourceIdentity identity) {
             if (identity == null) {
                 return this;
@@ -237,6 +300,14 @@ public final class CallerIdentities {
         }
 
         private void register(SourceIdentity identity) {
+            if (identity.isScoped()) {
+                SourceIdentity existing = bySource.putIfAbsent(identity.sourceId(), identity);
+                if (existing != null && !existing.equals(identity)) {
+                    throw new IllegalStateException("Two identities claim source '" + identity.sourceId()
+                            + "': '" + existing.username() + "' and '" + identity.username() + "'");
+                }
+                return;
+            }
             SourceIdentity existing = byType.putIfAbsent(identity.sourceType(), identity);
             if (existing != null && !existing.equals(identity)) {
                 // Which of two names wins would decide what the caller reads, so it must not be settled by
@@ -248,14 +319,15 @@ public final class CallerIdentities {
         }
 
         public CallerIdentities build() {
-            if (fallback == null && byType.isEmpty()) {
+            if (fallback == null && byType.isEmpty() && bySource.isEmpty()) {
                 return EMPTY;
             }
             // Insertion order is part of the contract, because describe() must reproduce
             // "alfresco:alice|nuxeo:bob" exactly and that string is a rate-limit bucket key. Map.copyOf
             // leaves iteration order unspecified, so it cannot be used here.
             return new CallerIdentities(fallback,
-                    Collections.unmodifiableMap(new LinkedHashMap<>(byType)));
+                    Collections.unmodifiableMap(new LinkedHashMap<>(byType)),
+                    Collections.unmodifiableMap(new LinkedHashMap<>(bySource)));
         }
     }
 }

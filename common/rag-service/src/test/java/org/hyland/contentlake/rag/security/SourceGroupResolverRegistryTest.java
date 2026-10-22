@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.security.GroupResolutionFailurePolicy;
 import org.hyland.contentlake.security.SourceGroupResolver;
 import org.junit.jupiter.api.AfterEach;
@@ -279,6 +280,77 @@ class SourceGroupResolverRegistryTest {
     // Helpers
     // -----------------------------------------------------------------------
 
+    @Test
+    void asksEachRepositoryOfOneTypeItsOwnDirectory() {
+        // Two Alfresco repositories: the same user is in Finance in one and in nothing in the other (#184).
+        SourceGroupResolverRegistry registry = uncached(
+                boundResolver("alfresco", "repo-a", () -> List.of("GROUP_Finance")),
+                boundResolver("alfresco", "repo-b", List::of));
+
+        assertThat(registry.authorities("alice", "repo-a", "alfresco")).contains("GROUP_Finance");
+        assertThat(registry.authorities("alice", "repo-b", "alfresco")).doesNotContain("GROUP_Finance");
+    }
+
+    @Test
+    void cachesEachRepositorySeparately() {
+        AtomicInteger calls = new AtomicInteger();
+        Supplier<List<String>> counting = () -> {
+            calls.incrementAndGet();
+            return List.of("GROUP_A");
+        };
+        SourceGroupResolverRegistry registry = cached(60L,
+                boundResolver("alfresco", "repo-a", counting), boundResolver("alfresco", "repo-b", counting));
+
+        registry.authorities("alice", "repo-a", "alfresco");
+        registry.authorities("alice", "repo-b", "alfresco");
+        registry.authorities("alice", "repo-a", "alfresco");
+
+        assertThat(calls).hasValue(2);
+    }
+
+    @Test
+    void neverAsksAnotherRepositoryForASourceItDoesNotServe() {
+        AtomicInteger calls = new AtomicInteger();
+        SourceGroupResolverRegistry registry = uncached(boundResolver("alfresco", "repo-a", () -> {
+            calls.incrementAndGet();
+            return List.of("GROUP_Finance");
+        }));
+
+        assertThat(registry.authorities("alice", "repo-c", "alfresco")).doesNotContain("GROUP_Finance");
+        assertThat(calls).hasValue(0);
+    }
+
+    @Test
+    void refusesTwoResolversForOneSource() {
+        assertThatThrownBy(() -> uncached(
+                boundResolver("alfresco", "repo-a", List::of), boundResolver("alfresco", "repo-a", List::of)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("repo-a");
+    }
+
+    @Test
+    void acceptsTwoResolversOfOneTypeBoundToDifferentSources() {
+        SourceGroupResolverRegistry registry = uncached(
+                boundResolver("alfresco", "repo-a", List::of), boundResolver("alfresco", "repo-b", List::of));
+
+        assertThat(registry.canExpandGroups("alfresco")).isTrue();
+        assertThat(registry.resolvableSourceTypes()).containsExactly("alfresco");
+    }
+
+    @Test
+    void buildsOneResolverPerConfiguredRepository() {
+        SourceRegistry sources = SourceRegistry.of(List.of(
+                new SourceRegistry.Source("repo-a", "alfresco", "http://a", "svc", "pw", null, null),
+                new SourceRegistry.Source("repo-b", "alfresco", "http://b", "svc", "pw", null, null),
+                new SourceRegistry.Source(null, "nuxeo", "http://n/nuxeo", "svc", "pw", null, null)));
+
+        List<SourceGroupResolver> resolvers = SourceGroupResolverRegistry.withRepositoryResolvers(List.of(), sources);
+
+        assertThat(resolvers).extracting(SourceGroupResolver::sourceId).containsExactly("repo-a", "repo-b", null);
+        assertThat(resolvers).extracting(SourceGroupResolver::sourceType)
+                .containsExactly("alfresco", "alfresco", "nuxeo");
+    }
+
     private static SourceGroupResolverRegistry uncached(SourceGroupResolver... resolvers) {
         return uncached(GroupResolutionFailurePolicy.FAIL_CLOSED, resolvers);
     }
@@ -298,6 +370,26 @@ class SourceGroupResolverRegistryTest {
             @Override
             public String sourceType() {
                 return sourceType;
+            }
+
+            @Override
+            public List<String> resolveGroups(String username) {
+                return answer.get();
+            }
+        };
+    }
+
+    private static SourceGroupResolver boundResolver(String sourceType, String sourceId,
+                                                     Supplier<List<String>> answer) {
+        return new SourceGroupResolver() {
+            @Override
+            public String sourceType() {
+                return sourceType;
+            }
+
+            @Override
+            public String sourceId() {
+                return sourceId;
             }
 
             @Override

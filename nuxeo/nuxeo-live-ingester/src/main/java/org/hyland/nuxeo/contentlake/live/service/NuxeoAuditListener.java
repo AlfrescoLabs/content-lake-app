@@ -1,6 +1,7 @@
 package org.hyland.nuxeo.contentlake.live.service;
 
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.nuxeo.contentlake.client.NuxeoClient;
@@ -20,6 +21,7 @@ import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Consumes the Nuxeo audit stream for near-live sync.
@@ -33,6 +35,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NuxeoAuditListener {
 
+    /** {@code NUXEO_SOURCE_ID} when it is not set. */
+    static final String DEFAULT_SOURCE_ID = "local";
+
+    private final AtomicBoolean defaultSourceIdWarned = new AtomicBoolean();
+
     private final NuxeoAuditClient auditClient;
     private final AuditCursorStore cursorStore;
     private final NodeSyncService nodeSyncService;
@@ -41,6 +48,20 @@ public class NuxeoAuditListener {
     private final NuxeoLiveProperties liveProperties;
     private final NuxeoAuditMetrics metrics;
     private final Clock clock;
+
+    /**
+     * Warns, once, that the source id is still the default. Every Nuxeo source left on it writes the same
+     * {@code cin_sourceId}, so a second one overwrites the first one's documents and each sweep deletes
+     * what the other ingested.
+     */
+    @PostConstruct
+    public void warnIfDefaultSourceId() {
+        if (DEFAULT_SOURCE_ID.equals(nuxeoClient.getSourceId()) && defaultSourceIdWarned.compareAndSet(false, true)) {
+            log.warn("NUXEO_SOURCE_ID is the default '{}'. That is fine for one Nuxeo repository; a second "
+                    + "Nuxeo source must set its own, or the two overwrite and delete each other's documents.",
+                    DEFAULT_SOURCE_ID);
+        }
+    }
 
     @Scheduled(
             initialDelayString = "#{@nuxeoLiveRuntime.audit.initialDelay.toMillis()}",

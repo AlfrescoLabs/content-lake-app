@@ -213,4 +213,77 @@ class CallerIdentitiesTest {
             assertThat(CallerIdentities.builder().build()).isSameAs(CallerIdentities.EMPTY);
         }
     }
+
+    @Nested
+    class IdentitiesScopedToOneSource {
+
+        private final CallerIdentities checkedInRepoA = CallerIdentities.builder()
+                .fallback(SourceIdentity.untyped("alice"))
+                .add(SourceIdentity.scoped("alfresco", "repo-a", "alice"))
+                .build();
+
+        @Test
+        void answersForItsOwnSource() {
+            assertThat(checkedInRepoA.usernameFor("repo-a", "alfresco")).isEqualTo("alice");
+        }
+
+        @Test
+        void leavesAnotherSourceOfTheSameTypeWithoutAName() {
+            // The fallback must not answer for repo-b: the type was checked source by source, and repo-b did
+            // not accept the caller.
+            assertThat(checkedInRepoA.usernameFor("repo-b", "alfresco")).isNull();
+        }
+
+        @Test
+        void stillSendsAnotherTypeToTheFallback() {
+            assertThat(checkedInRepoA.usernameFor("nuxeo-demo", "nuxeo")).isEqualTo("alice");
+        }
+
+        @Test
+        void holdsTwoSourcesOfOneTypeUnderDifferentNames() {
+            CallerIdentities identities = CallerIdentities.builder()
+                    .add(SourceIdentity.scoped("alfresco", "repo-a", "alice"))
+                    .add(SourceIdentity.scoped("alfresco", "repo-b", "a.smith"))
+                    .build();
+
+            assertThat(identities.usernameFor("repo-a", "alfresco")).isEqualTo("alice");
+            assertThat(identities.usernameFor("repo-b", "alfresco")).isEqualTo("a.smith");
+            assertThat(identities.sourceIds()).containsExactly("repo-a", "repo-b");
+            assertThat(identities.sourceTypes()).containsExactly("alfresco");
+        }
+
+        @Test
+        void refusesTwoNamesForOneSource() {
+            assertThatThrownBy(() -> CallerIdentities.builder()
+                    .add(SourceIdentity.scoped("alfresco", "repo-a", "alice"))
+                    .add(SourceIdentity.scoped("alfresco", "repo-a", "bob"))
+                    .build())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("repo-a");
+        }
+
+        @Test
+        void cannotBeTheFallback() {
+            assertThatThrownBy(() -> CallerIdentities.builder()
+                    .fallback(SourceIdentity.scoped("alfresco", "repo-a", "alice")))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void keepsTheDescriptionOfTheSameNameUnchanged() {
+            // Rate-limit buckets and stored feedback authors are keyed on describe().
+            assertThat(checkedInRepoA.describe()).isEqualTo("alice");
+        }
+
+        @Test
+        void changesTheScopeKeyBecauseItChangesWhatTheCallerReads() {
+            assertThat(checkedInRepoA.scopeKey()).isNotEqualTo(CallerIdentities.single("alice").scopeKey());
+        }
+
+        @Test
+        void leavesTheTwoArgumentUsernameLookupAsItWas() {
+            assertThat(checkedInRepoA.usernameFor("alfresco")).isNull();
+            assertThat(CallerIdentities.single("alice").usernameFor("alfresco")).isEqualTo("alice");
+        }
+    }
 }

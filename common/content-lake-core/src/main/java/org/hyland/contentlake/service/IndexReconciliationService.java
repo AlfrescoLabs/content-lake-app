@@ -206,6 +206,12 @@ public class IndexReconciliationService {
                 if (name != null && name.startsWith("_e_")) {
                     return;
                 }
+                // The scan is already filtered by source id; this keeps another source's document safe
+                // even if a query ever returned one, since two sources can share paths and node ids.
+                String documentSourceId = document.getCinSourceId();
+                if (documentSourceId != null && !documentSourceId.equals(sourceId)) {
+                    return;
+                }
                 if (!inScope.test(document)) {
                     return;
                 }

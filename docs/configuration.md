@@ -793,15 +793,34 @@ rag:
 | Setting | Effect |
 |---|---|
 | `group-resolution-failure` | What a query does when a group directory cannot be reached at all. `fail-closed` drops that source from the predicate; `degrade` keeps the caller's own name plus `GROUP_EVERYONE` and loses only group-granted documents. Both log at WARN; an unrecognised value reads as `fail-closed` |
-| `admin-bypass.enabled` | Whether `GROUP_ALFRESCO_ADMINISTRATORS` reads an Alfresco source with no `sys_racl` condition. Never applies to a Nuxeo source |
+| `admin-bypass.enabled` | Whether `GROUP_ALFRESCO_ADMINISTRATORS` reads an Alfresco source with no `sys_racl` condition. Applies per repository: membership in one Alfresco repository opens that repository only. Never applies to a Nuxeo source |
 | `group-cache.ttl-seconds` | How long a resolved membership is reused, and therefore the ceiling on how stale it may be: a caller removed from a group keeps reading that group's documents until the entry expires |
-| `group-cache.max-size` | Entry bound on that cache. Entries are keyed by source type and username, so the working set is roughly one per active caller per source type |
+| `group-cache.max-size` | Entry bound on that cache. Entries are keyed by resolver (one per repository, or one per type for a resolver serving the whole type) and username |
 
-Group expansion itself is per source type, not global: `rag-service` holds one `SourceGroupResolver` bean per
-type and ships three, for `alfresco`, `nuxeo` and `sharepoint`. A source of any other type contributes a
+Group expansion itself is per repository, not global: `rag-service` builds one Alfresco or Nuxeo resolver per
+`rag.sources[]` entry and ships a `sharepoint` resolver. A source of any other type contributes a
 clause built from the caller's own authorities only, so its group-granted documents are retrievable by
 nobody. That is logged once per source at WARN, and the remedy is a resolver bean for that type rather than a
 setting. Cache hit-rate is exposed as `cache.gets{cache=rag.security.groups}` under `/actuator/metrics`.
+
+##### Repositories (`rag.sources[]`)
+
+One entry per upstream repository. Empty (the default) means one entry per type built from the per-type keys
+(`content.service.*` and `alfresco.source-id` for Alfresco, `nuxeo.*` for Nuxeo), which is the
+single-repository deployment.
+
+| Property | Meaning |
+|---|---|
+| `id` | Bare source id, the part of `cin_sourceId` after `<type>:`. May be empty while a type has one entry. With two or more entries of a type every entry must set it, and startup fails otherwise. Unique across all types, because it is the `sys_racl` namespace |
+| `type` | `alfresco` or `nuxeo` |
+| `url` | Base URL for caller login checks and group lookups |
+| `service-username` / `service-password` | Service account for group lookups. Never used to authenticate callers |
+| `link-template` | Open-in-source link for this repository. Unset: the type's template, built on this entry's `url` |
+| `display-name` | Name shown by login screens through `GET /api/rag/sources` |
+
+Environment variables bind by index: `RAG_SOURCES_0_ID`, `RAG_SOURCES_0_TYPE`, `RAG_SOURCES_0_URL`, and so
+on. Configuring the ids of a type is a pin: an indexed source of that type that is not listed is not
+searched, and is reported once at WARN.
 
 ##### Entra ID group expansion
 

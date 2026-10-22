@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.rag.cache.RagQueryCache;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.rag.observability.RagObservations;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
@@ -22,6 +23,7 @@ import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.SectionMap;
 import org.hyland.contentlake.service.EmbeddingService;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -111,6 +113,17 @@ public class SemanticSearchService {
     private final PermissionFilterBuilder permissionFilterBuilder;
     /** The caller's identity per source type. Optional: null in unit tests, where one is built lazily. */
     private final CallerIdentityService callerIdentityServiceBean;
+
+    /**
+     * The configured sources (#181). Optional: absent in unit tests, where the per-type keys below are read
+     * directly.
+     */
+    private SourceRegistry sourceRegistry;
+
+    @Autowired(required = false)
+    void setSourceRegistry(SourceRegistry sourceRegistry) {
+        this.sourceRegistry = sourceRegistry;
+    }
 
     @Value("${alfresco.source-id:}")
     private String alfrescoSourceId;
@@ -856,6 +869,8 @@ public class SemanticSearchService {
     }
 
     private PermissionSourceCatalog.Configured configuredSources() {
-        return PermissionSourceCatalog.Configured.of(alfrescoSourceId, nuxeoSourceId, permissionSourceIds);
+        return sourceRegistry != null
+                ? PermissionSourceCatalog.Configured.of(sourceRegistry, permissionSourceIds)
+                : PermissionSourceCatalog.Configured.of(alfrescoSourceId, nuxeoSourceId, permissionSourceIds);
     }
 }

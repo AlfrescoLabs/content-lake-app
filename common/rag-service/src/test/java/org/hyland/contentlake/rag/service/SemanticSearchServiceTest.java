@@ -142,7 +142,7 @@ class SemanticSearchServiceTest {
             assertThat(identities.getValue().usernameFor("alfresco")).isEqualTo("alice");
             assertThat(identities.getValue().usernameFor("sharepoint")).isEqualTo("alice");
             // And the configured ids come from this service's own fields on every call.
-            assertThat(settings.getValue().sources().sourceIdOf("alfresco")).isEqualTo("test-repo");
+            assertThat(settings.getValue().sources().sourceIdsOf("alfresco")).containsExactly("test-repo");
         } finally {
             SecurityContextHolder.clearContext();
         }

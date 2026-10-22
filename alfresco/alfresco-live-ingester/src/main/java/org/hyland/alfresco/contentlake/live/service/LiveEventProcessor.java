@@ -39,6 +39,9 @@ public class LiveEventProcessor {
 
     public void processNodeStateChange(RepoEvent<DataAttributes<Resource>> event, String nodeId, boolean deleteIfMissing) {
         metrics.recordReceived();
+        if (isFromAnotherRepository(event)) {
+            return;
+        }
 
         if (nodeId == null || nodeId.isBlank()) {
             metrics.recordFiltered();
@@ -83,6 +86,9 @@ public class LiveEventProcessor {
 
     public void processDeletion(RepoEvent<DataAttributes<Resource>> event) {
         metrics.recordReceived();
+        if (isFromAnotherRepository(event)) {
+            return;
+        }
 
         String nodeId = extractPrimaryNodeId(event);
         if (nodeId == null || nodeId.isBlank()) {
@@ -107,6 +113,9 @@ public class LiveEventProcessor {
 
     public void processPermissionUpdate(RepoEvent<DataAttributes<Resource>> event) {
         metrics.recordReceived();
+        if (isFromAnotherRepository(event)) {
+            return;
+        }
 
         List<String> candidateNodeIds = extractCandidateNodeIds(event);
         String dedupNodeId = candidateNodeIds.isEmpty() ? null : candidateNodeIds.getFirst();
@@ -173,6 +182,9 @@ public class LiveEventProcessor {
 
     public void processFolderScopeChange(RepoEvent<DataAttributes<Resource>> event) {
         metrics.recordReceived();
+        if (isFromAnotherRepository(event)) {
+            return;
+        }
 
         String nodeId = extractPrimaryNodeId(event);
         if (nodeId == null || nodeId.isBlank()) {
@@ -245,6 +257,51 @@ public class LiveEventProcessor {
             metrics.recordError();
             log.error("Failed to process folder scope change {} for folder {}: {}", event.getType(), nodeId, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Whether the event was raised by a repository other than the one this ingester reads.
+     *
+     * <p>Event2 names its repository in {@code source}, as {@code /<repositoryId>}. Two repositories that
+     * publish to one broker and topic deliver each other's events here; acting on one would at best fail
+     * with "node not found" and at worst touch a node of the same id in this repository. An event without a
+     * source is processed, as is any event when the repository id cannot be read, so this check never drops
+     * an event that may be ours. The comparison is against the repository id, not
+     * {@code content.lake.source-id}, because that is what the repository writes into the event.</p>
+     */
+    private boolean isFromAnotherRepository(RepoEvent<DataAttributes<Resource>> event) {
+        String eventRepositoryId = repositoryIdOf(event);
+        if (eventRepositoryId == null) {
+            return false;
+        }
+        String ownRepositoryId;
+        try {
+            ownRepositoryId = alfrescoClient.getRepositoryId();
+        } catch (Exception e) {
+            log.debug("Could not read the repository id to check event {}: {}", event.getId(), e.getMessage());
+            return false;
+        }
+        if (ownRepositoryId == null || ownRepositoryId.equals(eventRepositoryId)) {
+            return false;
+        }
+        metrics.recordFiltered();
+        log.debug("Ignoring event {} ({}) from repository {}; this ingester reads repository {}",
+                event.getId(), event.getType(), eventRepositoryId, ownRepositoryId);
+        return true;
+    }
+
+    /** The repository id in an Event2 {@code source} ({@code /<repositoryId>}), or {@code null} when absent. */
+    static String repositoryIdOf(RepoEvent<?> event) {
+        if (event == null || event.getSource() == null) {
+            return null;
+        }
+        String source = event.getSource().toString();
+        int start = 0;
+        while (start < source.length() && source.charAt(start) == '/') {
+            start++;
+        }
+        String repositoryId = source.substring(start);
+        return repositoryId.isBlank() ? null : repositoryId;
     }
 
     private static boolean hasIndexedSelfAspect(Node folder) {

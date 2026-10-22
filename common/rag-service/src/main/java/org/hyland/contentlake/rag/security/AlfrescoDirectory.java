@@ -49,9 +49,14 @@ public class AlfrescoDirectory {
      * so a response whose id is still {@code TICKET_...} is followed by {@code people/-me-} to get the real
      * username.</p>
      */
-    @SuppressWarnings("unchecked")
     String validateTicket(String ticket) {
-        if (!isConfigured()) {
+        return isConfigured() ? validateTicket(alfrescoUrl, ticket) : null;
+    }
+
+    /** {@link #validateTicket(String)} against one repository, for a deployment with several (#183). */
+    @SuppressWarnings("unchecked")
+    String validateTicket(String alfrescoUrl, String ticket) {
+        if (alfrescoUrl == null || alfrescoUrl.isBlank()) {
             return null;
         }
         try {
@@ -85,7 +90,12 @@ public class AlfrescoDirectory {
 
     /** Whether the repository accepts this username and password, by minting a ticket for them. */
     boolean authenticate(String username, String password) {
-        if (!isConfigured()) {
+        return isConfigured() && authenticate(alfrescoUrl, username, password);
+    }
+
+    /** {@link #authenticate(String, String)} against one repository, for a deployment with several (#183). */
+    boolean authenticate(String alfrescoUrl, String username, String password) {
+        if (alfrescoUrl == null || alfrescoUrl.isBlank()) {
             return false;
         }
         try {

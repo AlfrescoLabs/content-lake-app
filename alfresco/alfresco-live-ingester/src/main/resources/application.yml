@@ -81,6 +81,13 @@ content:
       basicAuth:
         username: ${ALFRESCO_INTERNAL_USERNAME:admin}
         password: ${ALFRESCO_INTERNAL_PASSWORD:admin}
+  lake:
+    # Source id written to cin_sourceId and used as the ACL principal namespace (<user>_#_<sourceId>).
+    # Empty means the Alfresco Discovery repository id. Set it when two repositories share a repository
+    # id (for example a copy restored from another's volumes), or their documents overwrite each other.
+    # Changing it on an existing index means re-ingesting this repository. Use the same value on the batch
+    # and the live ingester of one repository.
+    source-id: ${ALFRESCO_SOURCE_ID:}
 
 alfresco:
   events:

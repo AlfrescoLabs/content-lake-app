@@ -40,7 +40,7 @@ flowchart TD
 | Caller to `rag-service` | HTTP Basic, Alfresco ticket, Nuxeo token, or the dual-source header pair, validated against the configured source repositories | the source repository decides *whether you are you* |
 | `rag-service` to the index | HTTP Basic with one service account plus the `HXCS-REPOSITORY` header | nothing; the service account is trusted completely |
 | Permission filtering | an HXQL predicate over `sys_racl`, built per request by `AclFilterBuilder` | `rag-service` decides *what you may read* |
-| Group resolution | one `SourceGroupResolver` per source type, selected by `SourceGroupResolverRegistry` and called with the service account: Alfresco `GET /people/{user}/groups`, Nuxeo `GET /api/v1/user/{username}` | the source repository is the authority on group membership |
+| Group resolution | one `SourceGroupResolver` per repository (per `rag.sources[]` entry), else per source type, selected by `SourceGroupResolverRegistry` and called with the service account: Alfresco `GET /people/{user}/groups`, Nuxeo `GET /api/v1/user/{username}` | the source repository is the authority on group membership |
 | The engine's own ACL policy | real code, and it runs, but it adds no restriction for an administrative principal | inert for this connection |
 
 Authentication answers a different question from authorization here, and the two live in different
@@ -139,11 +139,19 @@ what that one account may read, which is not the caller's answer.
   authorities. Only a resolver that could not ask at all follows the failure policy above. Collapsing
   the two would blank out a source for every site-local principal that legitimately exists in one
   repository and not another.
-- **A source type with no resolver expands no groups.** `SourceGroupResolverRegistry` selects by source
-  type and ships three, for `alfresco`, `nuxeo` and `sharepoint`; any other type gets the caller's own
-  authorities only, so group-granted documents on it are retrievable by nobody rather than by everybody.
-  Exactly one resolver may claim a type, and the registry refuses to start otherwise: which of two wins
-  would decide who reads what, and bean ordering must not settle that.
+- **A source with no resolver expands no groups.** `SourceGroupResolverRegistry` selects the resolver
+  bound to the source id, else the one serving its whole type. It builds one Alfresco or Nuxeo resolver
+  per `rag.sources[]` entry, with that repository's URL and service account, and ships a `sharepoint`
+  resolver; any other source gets the caller's own authorities only, so group-granted documents on it are
+  retrievable by nobody rather than by everybody. A source of a type whose resolvers are all bound to
+  other repositories gets none: asking another repository's directory is the leak this prevents.
+  Exactly one resolver may claim a source id, and exactly one may serve a whole type; the registry
+  refuses to start otherwise, because which of two wins would decide who reads what.
+- **Two repositories of one type are checked separately.** With two or more `rag.sources[]` entries of a
+  type, a password or ticket is checked against each of them, and the caller gets a name only in the
+  repositories that accepted it (`SourceCredentialChecker`). A repository that rejected the credential, or
+  could not be reached, gets no permission clause. The admin bypass follows the same rule: membership of
+  `GROUP_ALFRESCO_ADMINISTRATORS` in one repository opens that repository only.
 - **The `sharepoint` resolver is conditional, and its absence fails closed.** `EntraGroupResolver` exists
   only where `rag.security.entra.enabled` is true, so a SharePoint source on a deployment that has not
   configured it behaves exactly like a source type with no resolver: group-granted documents retrieve for
@@ -213,10 +221,20 @@ Stated plainly, because each of these is a reasonable thing to assume and none o
 - **No federation and no SSO across repositories.** Principals stay source-native and namespaced per
   source instance, and nothing maps one repository's identity onto another's. A caller may hold a
   separate identity per source and be trimmed to each one independently, but each of those identities
-  has to be established by a credential that source accepts. Where a caller has no identity for a
-  source, the fallback identity is used as-is, which assumes the same login string is valid there;
-  that assumption is the reason a source whose usernames differ needs its own authenticator rather
-  than the fallback.
+  has to be established by a credential that source accepts. Within one type that is enforced: once a
+  caller holds an identity checked against one repository of a type, no other repository of that type
+  falls back to it. Across types, a source the caller has no identity for still uses the fallback
+  identity as-is, which assumes the same login string is valid there; a source whose usernames differ
+  needs its own authenticator, or a `X-Source-Authorization` value naming it.
+- **Public documents are public per source.** `__Everyone__` is stored without a source namespace, so
+  each source's clause binds it to that source's `cin_sourceId`. A caller reads the public documents of
+  the sources they hold a clause for, and of no other: not of a repository they have no identity in, and
+  not of a source dropped by `fail-closed`.
+- **One credential per source.** `X-Source-Authorization: <sourceId> Basic <b64>` or
+  `<sourceId> Ticket <ticket>`, repeatable and comma-joined, checks each value against the directory of
+  the source it names. When present it is the whole credential set: there is no fallback identity, and an
+  unknown source or a credential that does not check out rejects the request with 401.
+  `GET /api/rag/sources` lists the source ids a UI can name, with no URL or service account.
 - **No write authorization.** `rag-service` is read-only. Ingestion runs with the ingesters' service
   accounts, and what lands in the index is decided by scope configuration, not by an end user's
   permissions.

@@ -36,14 +36,19 @@ public class NuxeoDirectory {
     }
 
     /** Resolves the username behind an authentication token, or {@code null} on failure. */
-    @SuppressWarnings("unchecked")
     String validateToken(String token) {
-        if (!isConfigured()) {
+        return isConfigured() ? validateToken(nuxeoUrl, token) : null;
+    }
+
+    /** {@link #validateToken(String)} against one server, for a deployment with several (#183). */
+    @SuppressWarnings("unchecked")
+    String validateToken(String nuxeoUrl, String token) {
+        if (nuxeoUrl == null || nuxeoUrl.isBlank()) {
             return null;
         }
         try {
             RestTemplate restTemplate = newRestTemplate();
-            String meUrl = apiUrl() + "/me";
+            String meUrl = apiUrl(nuxeoUrl) + "/me";
             HttpHeaders headers = new HttpHeaders();
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
             headers.set("X-Authentication-Token", token);
@@ -61,12 +66,17 @@ public class NuxeoDirectory {
 
     /** Whether the server accepts this username and password. */
     boolean authenticate(String username, String password) {
-        if (!isConfigured()) {
+        return isConfigured() && authenticate(nuxeoUrl, username, password);
+    }
+
+    /** {@link #authenticate(String, String)} against one server, for a deployment with several (#183). */
+    boolean authenticate(String nuxeoUrl, String username, String password) {
+        if (nuxeoUrl == null || nuxeoUrl.isBlank()) {
             return false;
         }
         try {
             RestTemplate restTemplate = newRestTemplate();
-            String meUrl = apiUrl() + "/me";
+            String meUrl = apiUrl(nuxeoUrl) + "/me";
             HttpHeaders headers = new HttpHeaders();
             headers.setBasicAuth(username, password);
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
@@ -89,7 +99,7 @@ public class NuxeoDirectory {
         return new RestTemplate(factory);
     }
 
-    private String apiUrl() {
+    private static String apiUrl(String nuxeoUrl) {
         String trimmed = nuxeoUrl.endsWith("/") ? nuxeoUrl.substring(0, nuxeoUrl.length() - 1) : nuxeoUrl;
         return trimmed.endsWith("/api/v1") ? trimmed : trimmed + "/api/v1";
     }

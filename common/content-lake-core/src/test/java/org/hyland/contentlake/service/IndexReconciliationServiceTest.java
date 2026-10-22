@@ -274,6 +274,39 @@ class IndexReconciliationServiceTest {
                 anyInt(), any());
     }
 
+    /**
+     * Two repositories of one type, same paths and same node ids. A sweep for one of them must never
+     * delete the other's document, even if the scan were to return it.
+     */
+    @Test
+    void neverDeletesADocumentOfAnotherSource() {
+        HxprDocument own = doc("gone", PREFIX + "/gone.txt");
+        own.setCinSourceId("alfresco:repo-uuid");
+        HxprDocument other = doc("gone-too", PREFIX + "/gone-too.txt");
+        other.setCinSourceId("alfresco:repo-copy");
+        indexHolds(doc("kept", PREFIX + "/kept.txt"), own, other);
+
+        IndexReconciliationService.Report report =
+                service.reconcile(seen("kept"), complete(), 0, inScope, enabled(1.0));
+
+        assertThat(report.inScope()).isEqualTo(2);
+        ArgumentCaptor<SourceTombstone> captor = ArgumentCaptor.forClass(SourceTombstone.class);
+        verify(nodeSyncService, times(1)).delete(captor.capture());
+        assertThat(captor.getValue().nodeId()).isEqualTo("gone");
+    }
+
+    /** With a configured source id, the scan is by that id, so the other repository is never read. */
+    @Test
+    void scansUnderAConfiguredSourceId() {
+        when(sourceClient.getSourceId()).thenReturn("repo-copy");
+        indexHolds(doc("a", PREFIX + "/a.txt"));
+
+        service.reconcile(seen("a"), complete(), 0, inScope, enabled(1.0));
+
+        verify(hxprService).forEachDocumentOfSource(org.mockito.ArgumentMatchers.eq("alfresco:repo-copy"),
+                anyInt(), any());
+    }
+
     @Test
     void underAnyPath_matchesTheRootItselfAndItsDescendants_butNotASiblingWithTheSamePrefixText() {
         Predicate<HxprDocument> predicate = IndexReconciliationService.underAnyPath(List.of("/root/a"));

@@ -3,6 +3,7 @@ package org.hyland.contentlake.rag.service;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,5 +83,49 @@ class SourceMetadataResolverTest {
         assertThat(sourceDocument.getSourceType()).isEqualTo("nuxeo");
         assertThat(sourceDocument.getOpenInSourceUrl())
                 .isEqualTo("http://localhost:8081/nuxeo/ui/#!/browse/default-domain/workspaces/finance/Meeting%20Notes%202026.docx");
+    }
+
+    private static HxprDocument alfrescoDoc(String cinSourceId) {
+        HxprDocument doc = new HxprDocument();
+        doc.setCinId("node-1");
+        doc.setCinSourceId(cinSourceId);
+        doc.setCinIngestProperties(Map.of(ContentLakeIngestProperties.SOURCE_TYPE, "alfresco",
+                ContentLakeIngestProperties.SOURCE_NAME, "a.pdf"));
+        return doc;
+    }
+
+    @Test
+    void linksEachRepositoryOfOneTypeToItself() {
+        resolver.setSourceRegistry(SourceRegistry.of(List.of(
+                new SourceRegistry.Source("repo-a", "alfresco", "http://a", "s", "s", "http://a/aca/{nodeId}", null),
+                new SourceRegistry.Source("repo-b", "alfresco", "http://b", "s", "s", "http://b/aca/{nodeId}", null))));
+
+        assertThat(resolver.resolveSourceDocument("d", alfrescoDoc("alfresco:repo-a")).getOpenInSourceUrl())
+                .isEqualTo("http://a/aca/node-1");
+        assertThat(resolver.resolveSourceDocument("d", alfrescoDoc("alfresco:repo-b")).getOpenInSourceUrl())
+                .isEqualTo("http://b/aca/node-1");
+    }
+
+    @Test
+    void fallsBackToTheTypeTemplateForASourceWithoutOne() {
+        resolver.setSourceRegistry(SourceRegistry.of(List.of(
+                new SourceRegistry.Source("repo-a", "alfresco", "http://a", "s", "s", "http://a/aca/{nodeId}", null),
+                new SourceRegistry.Source("repo-b", "alfresco", "http://b", "s", "s", null, null))));
+
+        assertThat(resolver.resolveSourceDocument("d", alfrescoDoc("alfresco:repo-b")).getOpenInSourceUrl())
+                .isEqualTo("http://localhost:80/share/page/document-details?nodeRef=workspace://SpacesStore/node-1");
+    }
+
+    @Test
+    void buildsTheTypeDefaultOnTheSourcesOwnUrl() {
+        RagProperties properties = new RagProperties();
+        properties.getSourceLinks().setAlfrescoTemplate("${content.service.url}/share/{nodeId}");
+        SourceMetadataResolver withDefault = new SourceMetadataResolver(properties, environment);
+        withDefault.setSourceRegistry(SourceRegistry.of(List.of(
+                new SourceRegistry.Source("repo-a", "alfresco", "http://a", "s", "s", null, null),
+                new SourceRegistry.Source("repo-b", "alfresco", "http://b", "s", "s", null, null))));
+
+        assertThat(withDefault.resolveSourceDocument("d", alfrescoDoc("alfresco:repo-b")).getOpenInSourceUrl())
+                .isEqualTo("http://b/share/node-1");
     }
 }

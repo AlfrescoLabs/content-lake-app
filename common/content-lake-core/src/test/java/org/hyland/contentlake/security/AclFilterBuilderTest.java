@@ -108,9 +108,19 @@ class AclFilterBuilderTest {
             String clause = AclFilterBuilder.sourcePermissionClause(
                     NUXEO, "nuxeo:" + NUXEO, List.of("bob", "GROUP_finance"), false);
 
-            assertThat(clause).isEqualTo("(sys_racl = '__Everyone__'"
+            assertThat(clause).isEqualTo("((sys_racl = '__Everyone__' AND (cin_sourceId = 'nuxeo:nuxeo-source' OR cin_sourceId = 'nuxeo-source'))"
                     + " OR sys_racl = 'u:bob_#_nuxeo-source'"
                     + " OR sys_racl = 'g:GROUP_finance_#_nuxeo-source')");
+        }
+
+        @Test
+        void bindsEveryoneToItsOwnSource() {
+            // A caller with a clause for one source must not read another source's public documents.
+            String clause = AclFilterBuilder.sourcePermissionClause(
+                    ALFRESCO, "alfresco:" + ALFRESCO, List.of("alice"), false);
+
+            assertThat(clause).contains("(sys_racl = '__Everyone__' AND (cin_sourceId = 'alfresco:alfresco-source'");
+            assertThat(clause).doesNotContain("(sys_racl = '__Everyone__' OR");
         }
 
         @Test
@@ -119,7 +129,7 @@ class AclFilterBuilderTest {
                     ALFRESCO, "alfresco:" + ALFRESCO,
                     AclFilterBuilder.defaultAuthorities("alice"), false);
 
-            assertThat(clause).isEqualTo("(sys_racl = '__Everyone__'"
+            assertThat(clause).isEqualTo("((sys_racl = '__Everyone__' AND (cin_sourceId = 'alfresco:alfresco-source' OR cin_sourceId = 'alfresco-source'))"
                     + " OR sys_racl = 'u:alice_#_alfresco-source')");
             assertThat(clause).doesNotContain("GROUP_EVERYONE");
         }
@@ -143,8 +153,7 @@ class AclFilterBuilderTest {
             String clause = AclFilterBuilder.sourcePermissionClause(
                     ALFRESCO, "alfresco:" + ALFRESCO, admin, false);
 
-            assertThat(clause).doesNotContain("cin_sourceId");
-            assertThat(clause).isEqualTo("(sys_racl = '__Everyone__'"
+            assertThat(clause).isEqualTo("((sys_racl = '__Everyone__' AND (cin_sourceId = 'alfresco:alfresco-source' OR cin_sourceId = 'alfresco-source'))"
                     + " OR sys_racl = 'u:admin_#_alfresco-source'"
                     + " OR sys_racl = 'g:GROUP_ALFRESCO_ADMINISTRATORS_#_alfresco-source')");
         }

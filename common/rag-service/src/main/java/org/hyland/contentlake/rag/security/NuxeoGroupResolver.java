@@ -2,10 +2,8 @@ package org.hyland.contentlake.rag.security;
 
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.security.SourceGroupResolver;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
@@ -27,17 +25,24 @@ import java.util.Set;
  * identity, which is not a failure; see {@link SourceGroupResolver}.</p>
  */
 @Slf4j
-@Component
 public class NuxeoGroupResolver implements SourceGroupResolver {
 
     private static final String GROUP_PREFIX = "GROUP_";
 
     private final RestClient restClient;
+    private final String sourceId;
 
-    public NuxeoGroupResolver(
-            @Value("${nuxeo.base-url:http://localhost:8081/nuxeo}") String baseUrl,
-            @Value("${nuxeo.username:Administrator}") String username,
-            @Value("${nuxeo.password:Administrator}") String password) {
+    /** A resolver for every source of the type, as the single-repository deployment has always had. */
+    public NuxeoGroupResolver(String baseUrl, String username, String password) {
+        this(baseUrl, username, password, null);
+    }
+
+    /**
+     * A resolver for one repository. Built per {@code rag.sources[]} entry by
+     * {@link SourceGroupResolverRegistry}, not as a bean, so two repositories of one type get two.
+     */
+    public NuxeoGroupResolver(String baseUrl, String username, String password, String sourceId) {
+        this.sourceId = sourceId == null || sourceId.isBlank() ? null : sourceId.trim();
         this.restClient = RestClient.builder()
                 .baseUrl(apiUrl(baseUrl))
                 .defaultHeaders(headers -> {
@@ -50,6 +55,11 @@ public class NuxeoGroupResolver implements SourceGroupResolver {
     @Override
     public String sourceType() {
         return "nuxeo";
+    }
+
+    @Override
+    public String sourceId() {
+        return sourceId;
     }
 
     @Override

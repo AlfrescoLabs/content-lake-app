@@ -10,12 +10,14 @@ import org.hyland.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.spi.SourceNode;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
@@ -23,8 +25,10 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,8 +73,8 @@ class LiveEventProcessorTest {
                 metrics
         );
 
-        when(event.getData()).thenReturn(data);
-        when(data.getResource()).thenReturn(resource);
+        lenient().when(event.getData()).thenReturn(data);
+        lenient().when(data.getResource()).thenReturn(resource);
     }
 
     @Test
@@ -245,6 +249,91 @@ class LiveEventProcessorTest {
 
         verify(folderSubtreeReconciler).reconcileTearDown(eq(folder), any());
         verify(folderSubtreeReconciler, never()).reconcile(any(), any());
+    }
+
+    /** Events from another repository on a shared broker and topic. */
+    @Nested
+    class AnotherRepository {
+
+        @BeforeEach
+        void ownRepository() {
+            lenient().when(alfrescoClient.getRepositoryId()).thenReturn("repo-main");
+        }
+
+        @Test
+        void nodeStateChangeFromAnotherRepository_isIgnored() {
+            when(event.getSource()).thenReturn(URI.create("/repo-other"));
+            lenient().when(resource.getId()).thenReturn("file-1");
+
+            processor.processNodeStateChange(event);
+
+            verify(alfrescoClient, never()).getAlfrescoNode(any());
+            verifyNoInteractions(nodeSyncService, deduplicator);
+            assertThat(metrics.getFilteredCount()).isEqualTo(1);
+        }
+
+        @Test
+        void deletionFromAnotherRepository_isIgnored() {
+            when(event.getSource()).thenReturn(URI.create("/repo-other"));
+
+            processor.processDeletion(event);
+
+            verifyNoInteractions(nodeSyncService, deduplicator);
+        }
+
+        @Test
+        void permissionUpdateFromAnotherRepository_isIgnored() {
+            when(event.getSource()).thenReturn(URI.create("/repo-other"));
+
+            processor.processPermissionUpdate(event);
+
+            verifyNoInteractions(nodeSyncService, folderSubtreeReconciler, deduplicator);
+        }
+
+        @Test
+        void folderScopeChangeFromAnotherRepository_isIgnored() {
+            when(event.getSource()).thenReturn(URI.create("/repo-other"));
+
+            processor.processFolderScopeChange(event);
+
+            verifyNoInteractions(folderSubtreeReconciler, deduplicator);
+        }
+
+        @Test
+        void eventFromOwnRepository_isProcessed() {
+            when(event.getSource()).thenReturn(URI.create("/repo-main"));
+            when(resource.getId()).thenReturn("file-1");
+            when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
+
+            processor.processDeletion(event);
+
+            verify(nodeSyncService).deleteNode(eq("file-1"), any());
+        }
+
+        /** An event that names no repository may be ours, so it is processed as before. */
+        @Test
+        void eventWithoutSource_isProcessedWithoutReadingTheRepositoryId() {
+            when(resource.getId()).thenReturn("file-1");
+            when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
+
+            processor.processDeletion(event);
+
+            verify(nodeSyncService).deleteNode(eq("file-1"), any());
+            verify(alfrescoClient, never()).getRepositoryId();
+        }
+
+        /** The repository's own id is compared, never the configured source id. */
+        @Test
+        void sourceIdOverride_doesNotChangeWhichEventsAreOurs() {
+            lenient().when(alfrescoClient.getSourceId()).thenReturn("repo-other");
+            when(event.getSource()).thenReturn(URI.create("/repo-main"));
+            when(resource.getId()).thenReturn("file-1");
+            when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
+
+            processor.processDeletion(event);
+
+            verify(nodeSyncService).deleteNode(eq("file-1"), any());
+        }
     }
 
     private static Node folder(String nodeId, OffsetDateTime modifiedAt, List<String> aspectNames) {

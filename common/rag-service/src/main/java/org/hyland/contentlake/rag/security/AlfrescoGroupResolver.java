@@ -2,10 +2,8 @@ package org.hyland.contentlake.rag.security;
 
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.security.SourceGroupResolver;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
@@ -26,7 +24,6 @@ import java.util.Map;
  * failure; see {@link SourceGroupResolver}.</p>
  */
 @Slf4j
-@Component
 public class AlfrescoGroupResolver implements SourceGroupResolver {
 
     private static final String GROUPS_PATH =
@@ -42,11 +39,19 @@ public class AlfrescoGroupResolver implements SourceGroupResolver {
     private static final int MAX_PAGES = 100;
 
     private final RestClient restClient;
+    private final String sourceId;
 
-    public AlfrescoGroupResolver(
-            @Value("${content.service.url}") String baseUrl,
-            @Value("${content.service.security.basicAuth.username}") String serviceAccountUsername,
-            @Value("${content.service.security.basicAuth.password}") String serviceAccountPassword) {
+    /** A resolver for every source of the type, as the single-repository deployment has always had. */
+    public AlfrescoGroupResolver(String baseUrl, String serviceAccountUsername, String serviceAccountPassword) {
+        this(baseUrl, serviceAccountUsername, serviceAccountPassword, null);
+    }
+
+    /**
+     * A resolver for one repository. Built per {@code rag.sources[]} entry by
+     * {@link SourceGroupResolverRegistry}, not as a bean, so two repositories of one type get two.
+     */
+    public AlfrescoGroupResolver(String baseUrl, String serviceAccountUsername, String serviceAccountPassword, String sourceId) {
+        this.sourceId = sourceId == null || sourceId.isBlank() ? null : sourceId.trim();
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl)
                 .defaultHeaders(headers -> {
@@ -59,6 +64,11 @@ public class AlfrescoGroupResolver implements SourceGroupResolver {
     @Override
     public String sourceType() {
         return "alfresco";
+    }
+
+    @Override
+    public String sourceId() {
+        return sourceId;
     }
 
     @Override

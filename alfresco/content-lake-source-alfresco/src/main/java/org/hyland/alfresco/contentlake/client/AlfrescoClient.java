@@ -1,6 +1,5 @@
 package org.hyland.alfresco.contentlake.client;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.alfresco.contentlake.adapter.AlfrescoSourceNodeAdapter;
 import org.hyland.contentlake.spi.ConnectorSchema;
@@ -13,6 +12,8 @@ import org.alfresco.core.model.NodeChildAssociationEntry;
 import org.alfresco.core.model.NodeChildAssociationPaging;
 import org.alfresco.core.model.PermissionElement;
 import org.alfresco.discovery.handler.DiscoveryApi;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.lang.Nullable;
@@ -42,7 +43,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AlfrescoClient implements ContentSourceClient {
 
     private static final int DEFAULT_PAGE_SIZE = 100;
@@ -63,15 +63,44 @@ public class AlfrescoClient implements ContentSourceClient {
     private final NodesApi nodesApi;
     private final DiscoveryApi discoveryApi;
 
+    /** Configured source id ({@code content.lake.source-id}), or {@code null} to use the repository id. */
+    private final @Nullable String configuredSourceId;
+
     private volatile @Nullable String cachedRepositoryId;
+
+    /** Creates a client whose source id is the repository id. */
+    public AlfrescoClient(NodesApi nodesApi, DiscoveryApi discoveryApi) {
+        this(nodesApi, discoveryApi, null);
+    }
+
+    /**
+     * Creates a client with an optional source id override.
+     *
+     * @param sourceId value of {@code content.lake.source-id}; blank means the Discovery API repository id
+     */
+    @Autowired
+    public AlfrescoClient(NodesApi nodesApi,
+                          DiscoveryApi discoveryApi,
+                          @Value("${content.lake.source-id:}") @Nullable String sourceId) {
+        this.nodesApi = nodesApi;
+        this.discoveryApi = discoveryApi;
+        this.configuredSourceId = sourceId == null || sourceId.isBlank() ? null : sourceId.trim();
+    }
 
     // ──────────────────────────────────────────────────────────────────────
     // ContentSourceClient — SPI implementation
     // ──────────────────────────────────────────────────────────────────────
 
+    /**
+     * The id written to {@code cin_sourceId} and used as the ACL principal namespace.
+     *
+     * <p>{@code content.lake.source-id} when set, otherwise the Discovery API repository id. Two repositories
+     * restored from the same volumes share a repository id, so the override is what keeps their documents
+     * apart. Changing it on an existing index means re-ingesting that repository.</p>
+     */
     @Override
     public String getSourceId() {
-        return getRepositoryId();
+        return configuredSourceId != null ? configuredSourceId : getRepositoryId();
     }
 
     @Override
@@ -96,6 +125,8 @@ public class AlfrescoClient implements ContentSourceClient {
                         "Service account the ingester reads the repository with")
                 .secret("content.service.security.basicAuth.password",
                         "Password for that service account", true)
+                .optional("content.lake.source-id", ConnectorSchema.FieldType.STRING,
+                        "Source id for cin_sourceId and ACL principals; empty means the repository id")
                 .optional("transform.url", ConnectorSchema.FieldType.URL,
                         "Alfresco Transform Core endpoint used to extract text")
                 .optional("transform.enabled", ConnectorSchema.FieldType.BOOLEAN,
@@ -444,6 +475,9 @@ public class AlfrescoClient implements ContentSourceClient {
 
     /**
      * Returns the repository identifier and caches it after the first call.
+     *
+     * <p>This is always the repository's own id, whatever {@code content.lake.source-id} says: it is what
+     * Event2 events and ACL change messages carry to name the repository they came from.</p>
      *
      * @return repository identifier
      */

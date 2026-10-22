@@ -3,6 +3,7 @@ package org.hyland.contentlake.rag.service;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -101,12 +103,14 @@ final class PermissionSourceCatalog {
      * would otherwise be typed by whichever the map happened to yield first, and configuration wins over the
      * index precisely so that answer is predictable.</p>
      */
-    record Configured(Map<String, String> sourceIdsByType, String pinnedSourceIds) {
+    record Configured(Map<String, List<String>> sourceIdsByType, String pinnedSourceIds) {
 
         Configured {
-            sourceIdsByType = sourceIdsByType == null
-                    ? Map.of()
-                    : Collections.unmodifiableMap(new LinkedHashMap<>(sourceIdsByType));
+            Map<String, List<String>> copy = new LinkedHashMap<>();
+            if (sourceIdsByType != null) {
+                sourceIdsByType.forEach((type, ids) -> copy.put(type, ids == null ? List.of() : List.copyOf(ids)));
+            }
+            sourceIdsByType = Collections.unmodifiableMap(copy);
         }
 
         /**
@@ -117,28 +121,33 @@ final class PermissionSourceCatalog {
          * convention.</p>
          */
         static Configured of(String alfrescoSourceId, String nuxeoSourceId, String pinnedSourceIds) {
-            Map<String, String> byType = new LinkedHashMap<>();
+            Map<String, List<String>> byType = new LinkedHashMap<>();
             if (alfrescoSourceId != null && !alfrescoSourceId.isBlank()) {
-                byType.put(ALFRESCO, alfrescoSourceId);
+                byType.put(ALFRESCO, List.of(alfrescoSourceId));
             }
             if (nuxeoSourceId != null && !nuxeoSourceId.isBlank()) {
-                byType.put(NUXEO, nuxeoSourceId);
+                byType.put(NUXEO, List.of(nuxeoSourceId));
             }
             return new Configured(byType, pinnedSourceIds);
+        }
+
+        /** The ids configured in {@code rag.sources[]} (or its legacy keys), by type. */
+        static Configured of(SourceRegistry registry, String pinnedSourceIds) {
+            return new Configured(registry.configuredIdsByType(), pinnedSourceIds);
         }
 
         boolean hasPin() {
             return pinnedSourceIds != null && !pinnedSourceIds.isBlank();
         }
 
-        /** The configured source id for one type, as configured, or {@code null}. */
-        String sourceIdOf(String sourceType) {
-            return sourceType == null ? null : sourceIdsByType.get(normalizeType(sourceType));
+        /** The configured source ids for one type, as configured, in declaration order. */
+        List<String> sourceIdsOf(String sourceType) {
+            return sourceType == null ? List.of() : sourceIdsByType.getOrDefault(normalizeType(sourceType), List.of());
         }
 
         /** Every configured source id, in declaration order. */
         List<String> configuredIds() {
-            return List.copyOf(sourceIdsByType.values());
+            return sourceIdsByType.values().stream().flatMap(List::stream).toList();
         }
     }
 
@@ -148,6 +157,8 @@ final class PermissionSourceCatalog {
 
     /** Bare source id to source type, as read from the index. Empty until the first successful scan. */
     private volatile Map<String, String> cached;
+    /** Unlisted indexed sources already warned about, so each is logged once. */
+    private final Set<String> unlistedWarned = ConcurrentHashMap.newKeySet();
     private volatile Instant cachedAt;
 
     @Autowired
@@ -217,9 +228,11 @@ final class PermissionSourceCatalog {
         if (sourceId == null || sourceId.isBlank()) {
             return null;
         }
-        for (Map.Entry<String, String> configuredSource : configured.sourceIdsByType().entrySet()) {
-            if (sourceId.equals(bareId(configuredSource.getValue()))) {
-                return configuredSource.getKey();
+        for (Map.Entry<String, List<String>> configuredType : configured.sourceIdsByType().entrySet()) {
+            for (String configuredId : configuredType.getValue()) {
+                if (sourceId.equals(bareId(configuredId))) {
+                    return configuredType.getKey();
+                }
             }
         }
         return indexedSources().get(sourceId);
@@ -306,16 +319,30 @@ final class PermissionSourceCatalog {
     }
 
     private void addIdsOfType(Set<String> sourceIds, Configured configured, String type) {
-        addBareId(sourceIds, configured.sourceIdOf(type));
+        configured.sourceIdsOf(type).forEach(id -> addBareId(sourceIds, id));
+        Map<String, String> indexed = indexedSources();
         if (!sourceIds.isEmpty()) {
-            // A configured id for the requested type answers it, without reading the index.
+            // Configured ids for the requested type answer it: a pin is deliberate. What it leaves out is
+            // reported, once per source, because an unlisted source is otherwise invisible with no trace (#186).
+            indexed.forEach((sourceId, indexedType) -> {
+                if (type.equals(indexedType) && !sourceIds.contains(sourceId) && unlistedWarned.add(sourceId)) {
+                    log.warn("Source {}:{} is in the index but not configured, and {} sources are configured, "
+                                    + "so requests scoped to {} do not search it. Add it to rag.sources to include it",
+                            type, sourceId, type, type);
+                }
+            });
             return;
         }
-        indexedSources().forEach((sourceId, indexedType) -> {
+        indexed.forEach((sourceId, indexedType) -> {
             if (type.equals(indexedType)) {
                 sourceIds.add(sourceId);
             }
         });
+    }
+
+    /** Indexed sources of a pinned type that are not configured, as reported by {@link #addIdsOfType}. */
+    Set<String> unlistedSources() {
+        return Set.copyOf(unlistedWarned);
     }
 
     private boolean isExpired() {

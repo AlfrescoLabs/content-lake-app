@@ -131,6 +131,36 @@ public class RagProperties {
     private SecurityProperties security = new SecurityProperties();
 
     /**
+     * The upstream repositories, one entry each (#181). Empty means "built from the per-type keys"; see
+     * {@link SourceRegistry}.
+     */
+    private List<SourceProperties> sources = new ArrayList<>();
+
+    /** One upstream repository in {@code rag.sources[]}. */
+    @Data
+    public static class SourceProperties {
+
+        /** Bare source id, as stored after {@code <type>:} in {@code cin_sourceId}. */
+        private String id;
+
+        /** {@code alfresco} or {@code nuxeo}. */
+        private String type;
+
+        /** Base URL the directory and the group resolver call. */
+        private String url;
+
+        /** Service account for group lookups. Never used to authenticate callers. */
+        private String serviceUsername;
+        private String servicePassword;
+
+        /** Open-in-source link template for this source; the type's template applies when unset. */
+        private String linkTemplate;
+
+        /** Name a login screen shows. Defaults to the type, plus the id when the type has several sources. */
+        private String displayName;
+    }
+
+    /**
      * How a caller's group membership is resolved, and what happens when it cannot be.
      *
      * <p>{@code rag.security.admin-bypass.enabled} is deliberately absent: it decides the shape of the ACL

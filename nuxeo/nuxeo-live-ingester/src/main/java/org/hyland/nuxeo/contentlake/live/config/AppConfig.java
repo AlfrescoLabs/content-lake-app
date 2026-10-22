@@ -1,5 +1,6 @@
 package org.hyland.nuxeo.contentlake.live.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.nio.file.Path;
 import java.time.Clock;
 
+@Slf4j
 @Configuration
 @EnableConfigurationProperties({
         HxprProperties.class,
@@ -149,9 +151,22 @@ public class AppConfig {
         return new NuxeoLiveProperties();
     }
 
+    /**
+     * One cursor file per source. An explicit {@code nuxeo.live.audit.cursor-file} is used as given;
+     * otherwise the file is named after the source id in {@code cursor-dir}, and the shared
+     * {@code audit-cursor.json} there is read once so an upgrade does not replay the audit log.
+     */
     @Bean
-    public AuditCursorStore auditCursorStore(NuxeoLiveProperties props) {
-        return new FileAuditCursorStore(Path.of(props.getAudit().getCursorFile()));
+    public AuditCursorStore auditCursorStore(NuxeoLiveProperties props, NuxeoProperties nuxeoProps) {
+        String explicitFile = props.getAudit().getCursorFile();
+        Path directory = Path.of(props.getAudit().getCursorDir());
+        Path legacyFile = directory.resolve(FileAuditCursorStore.LEGACY_FILE_NAME);
+        FileAuditCursorStore store = explicitFile != null && !explicitFile.isBlank()
+                ? new FileAuditCursorStore(Path.of(explicitFile), legacyFile)
+                : new FileAuditCursorStore(
+                        FileAuditCursorStore.defaultCursorFile(directory, nuxeoProps.getSourceId()), legacyFile);
+        log.info("Nuxeo audit cursor file: {}", store.cursorFile());
+        return store;
     }
 
     @Bean

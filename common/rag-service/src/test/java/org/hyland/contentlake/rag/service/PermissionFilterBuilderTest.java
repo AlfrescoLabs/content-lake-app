@@ -15,7 +15,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +58,14 @@ class PermissionFilterBuilderTest {
                                                 SourceGroupResolver... resolvers) {
         return new PermissionFilterBuilder(catalogue,
                 new SourceGroupResolverRegistry(List.of(resolvers), policy, 0L, 0L, null));
+    }
+
+    /**
+     * The filter with every Everyone binding removed, so what is left of {@code cin_sourceId} is a whole-source
+     * read (the admin bypass) and nothing else.
+     */
+    private static String wholeSourceReads(String filter) {
+        return filter.replaceAll("AND \\(cin_sourceId = '[^']*' OR cin_sourceId = '[^']*'\\)", "");
     }
 
     private static PermissionFilterBuilder.Settings settings(boolean adminBypass) {
@@ -326,7 +336,7 @@ class PermissionFilterBuilderTest {
             // anyone else. The E2E depends on this: a CMIS document must be granted to admin by name for an
             // administrator to retrieve it.
             assertThat(filter).contains("sys_racl = 'u:admin_#_docbase-1'");
-            assertThat(filter).doesNotContain("cin_sourceId = 'cmis:docbase-1'");
+            assertThat(wholeSourceReads(filter)).doesNotContain("cin_sourceId = 'cmis:docbase-1'");
         }
     }
 
@@ -357,7 +367,7 @@ class PermissionFilterBuilderTest {
             String filter = builder.query(twoWay, settings(true), null, null);
 
             // The bypass group is Alfresco's policy and grants nothing in another source.
-            assertThat(filter).doesNotContain("cin_sourceId = 'sharepoint:site-1'");
+            assertThat(wholeSourceReads(filter)).doesNotContain("cin_sourceId = 'sharepoint:site-1'");
             assertThat(filter).contains("sys_racl = 'u:admin_#_site-1'");
         }
     }
@@ -437,7 +447,7 @@ class PermissionFilterBuilderTest {
             String filter = builder.query(CallerIdentities.single("admin"), alfrescoOnly(), "alfresco", null);
 
             // No unconditional source clause: the administrator reads through sys_racl like everyone else.
-            assertThat(filter).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
+            assertThat(wholeSourceReads(filter)).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
             assertThat(filter).contains("sys_racl = 'u:admin_#_test-repo'");
             // The group is namespaced like any other, so it grants only what documents actually name.
             assertThat(filter).contains("sys_racl = 'g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo'");
@@ -469,6 +479,96 @@ class PermissionFilterBuilderTest {
 
             assertThat(filter).contains("sys_racl = 'u:alice_#_test-repo'");
             assertThat(filter).contains("sys_racl = '__Everyone__'");
+        }
+    }
+
+    @Nested
+    class TwoSourcesOfOneType {
+
+        private PermissionFilterBuilder.Settings twoAlfrescos() {
+            return twoAlfrescos(false);
+        }
+
+        private PermissionFilterBuilder.Settings twoAlfrescos(boolean adminBypass) {
+            Map<String, List<String>> byType = new LinkedHashMap<>();
+            byType.put("alfresco", List.of("repo-a", "repo-b"));
+            return new PermissionFilterBuilder.Settings(
+                    new PermissionSourceCatalog.Configured(byType, null), adminBypass);
+        }
+
+        private SourceGroupResolver bound(String sourceId, List<String> groups) {
+            return new SourceGroupResolver() {
+                @Override
+                public String sourceType() {
+                    return "alfresco";
+                }
+
+                @Override
+                public String sourceId() {
+                    return sourceId;
+                }
+
+                @Override
+                public List<String> resolveGroups(String username) {
+                    return groups;
+                }
+            };
+        }
+
+        private final CallerIdentities adminInBoth = CallerIdentities.builder()
+                .add(SourceIdentity.scoped("alfresco", "repo-a", "admin"))
+                .add(SourceIdentity.scoped("alfresco", "repo-b", "admin"))
+                .build();
+
+        @Test
+        void opensOnlyTheRepositoryWhereTheCallerIsAnAdministrator() {
+            // #185: an administrator of repo-a must not get an unfiltered read of repo-b.
+            PermissionFilterBuilder builder = builderWith(
+                    bound("repo-a", List.of("GROUP_ALFRESCO_ADMINISTRATORS")), bound("repo-b", List.of()));
+
+            String filter = builder.query(adminInBoth, twoAlfrescos(true), "alfresco", null);
+
+            assertThat(filter).contains("cin_sourceId = 'alfresco:repo-a'");
+            assertThat(wholeSourceReads(filter)).doesNotContain("cin_sourceId = 'alfresco:repo-b'");
+            assertThat(filter).contains("sys_racl = 'u:admin_#_repo-b'");
+        }
+
+        @Test
+        void opensBothRepositoriesForAnAdministratorOfBoth() {
+            PermissionFilterBuilder builder = builderWith(
+                    bound("repo-a", List.of("GROUP_ALFRESCO_ADMINISTRATORS")),
+                    bound("repo-b", List.of("GROUP_ALFRESCO_ADMINISTRATORS")));
+
+            String filter = builder.query(adminInBoth, twoAlfrescos(true), "alfresco", null);
+
+            assertThat(filter).contains("cin_sourceId = 'alfresco:repo-a'");
+            assertThat(filter).contains("cin_sourceId = 'alfresco:repo-b'");
+        }
+
+        @Test
+        void buildsAClauseForEverySourceTheCallerWasCheckedIn() {
+            CallerIdentities identities = CallerIdentities.builder()
+                    .add(SourceIdentity.scoped("alfresco", "repo-a", "alice"))
+                    .add(SourceIdentity.scoped("alfresco", "repo-b", "a.smith"))
+                    .build();
+
+            String filter = builderWith().query(identities, twoAlfrescos(), "alfresco", null);
+
+            assertThat(filter).contains("sys_racl = 'u:alice_#_repo-a'");
+            assertThat(filter).contains("sys_racl = 'u:a.smith_#_repo-b'");
+        }
+
+        @Test
+        void givesNoClauseToASourceTheCallerWasNotCheckedIn() {
+            CallerIdentities identities = CallerIdentities.builder()
+                    .fallback(SourceIdentity.untyped("alice"))
+                    .add(SourceIdentity.scoped("alfresco", "repo-a", "alice"))
+                    .build();
+
+            String filter = builderWith().query(identities, twoAlfrescos(), "alfresco", null);
+
+            assertThat(filter).contains("_#_repo-a'");
+            assertThat(filter).doesNotContain("repo-b");
         }
     }
 }

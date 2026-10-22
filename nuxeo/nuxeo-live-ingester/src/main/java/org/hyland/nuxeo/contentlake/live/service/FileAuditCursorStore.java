@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import lombok.extern.slf4j.Slf4j;
 import org.hyland.nuxeo.contentlake.live.model.AuditCursor;
 
 import java.io.IOException;
@@ -16,7 +17,24 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 
+/**
+ * Keeps audit cursors in a JSON file, one file per source.
+ *
+ * <p>Each write goes to a temporary file that is then renamed over the cursor file, so a crash leaves
+ * either the old position or the new one, never a half-written file. The file is still rewritten whole
+ * on each save, which is why two ingesters must never share one: each would overwrite the other's key.
+ * {@link #defaultCursorFile(Path, String)} names the file after the source id for that reason.</p>
+ *
+ * <p>A legacy file, the single shared {@code audit-cursor.json}, can be given as a fallback. The first
+ * load of a key this store does not hold reads it once and copies that key's cursor into this store's own
+ * file, so an upgrade resumes where it was instead of replaying the audit log. The legacy file is left
+ * as it is, since another source's ingester may still need its own key from it.</p>
+ */
+@Slf4j
 public class FileAuditCursorStore implements AuditCursorStore {
+
+    /** The name of the single cursor file all sources shared. */
+    public static final String LEGACY_FILE_NAME = "audit-cursor.json";
 
     /**
      * The cursor file's own mapper, owned here rather than injected.
@@ -38,33 +56,82 @@ public class FileAuditCursorStore implements AuditCursorStore {
             .build();
 
     private final Path cursorFile;
+    private final Path legacyFile;
+    private boolean legacyRead;
 
     public FileAuditCursorStore(Path cursorFile) {
+        this(cursorFile, null);
+    }
+
+    /**
+     * @param cursorFile this store's own file
+     * @param legacyFile a shared cursor file to read once for keys this store does not hold yet, or
+     *                   {@code null} for none
+     */
+    public FileAuditCursorStore(Path cursorFile, Path legacyFile) {
         this.cursorFile = cursorFile;
+        this.legacyFile = legacyFile == null || legacyFile.equals(cursorFile) ? null : legacyFile;
+    }
+
+    /**
+     * {@code <directory>/audit-cursor-<sourceId>.json}. Characters that are unsafe in a file name are
+     * replaced with {@code _}.
+     */
+    public static Path defaultCursorFile(Path directory, String sourceId) {
+        String safeId = sourceId == null || sourceId.isBlank()
+                ? "default"
+                : sourceId.replaceAll("[^A-Za-z0-9._-]", "_");
+        return directory.resolve("audit-cursor-" + safeId + ".json");
+    }
+
+    public Path cursorFile() {
+        return cursorFile;
     }
 
     @Override
     public synchronized Optional<AuditCursor> load(String repositoryKey) {
-        return Optional.ofNullable(readState().cursors().get(repositoryKey));
+        CursorState state = readState(cursorFile);
+        AuditCursor cursor = state.cursors().get(repositoryKey);
+        if (cursor != null) {
+            return Optional.of(cursor);
+        }
+        return loadFromLegacy(repositoryKey, state);
+    }
+
+    private Optional<AuditCursor> loadFromLegacy(String repositoryKey, CursorState state) {
+        if (legacyFile == null || legacyRead) {
+            return Optional.empty();
+        }
+        legacyRead = true;
+        AuditCursor legacyCursor = readState(legacyFile).cursors().get(repositoryKey);
+        if (legacyCursor == null) {
+            return Optional.empty();
+        }
+        Map<String, AuditCursor> updated = new LinkedHashMap<>(state.cursors());
+        updated.put(repositoryKey, legacyCursor);
+        writeState(new CursorState(updated));
+        log.info("Copied the audit cursor for {} from {} to {}; the old file is no longer read for it",
+                repositoryKey, legacyFile, cursorFile);
+        return Optional.of(legacyCursor);
     }
 
     @Override
     public synchronized void save(String repositoryKey, AuditCursor cursor) {
-        CursorState state = readState();
+        CursorState state = readState(cursorFile);
         Map<String, AuditCursor> updated = new LinkedHashMap<>(state.cursors());
         updated.put(repositoryKey, cursor);
         writeState(new CursorState(updated));
     }
 
-    private CursorState readState() {
-        if (Files.notExists(cursorFile)) {
+    private static CursorState readState(Path file) {
+        if (Files.notExists(file)) {
             return CursorState.empty();
         }
         try {
-            CursorState state = OBJECT_MAPPER.readValue(cursorFile.toFile(), CursorState.class);
+            CursorState state = OBJECT_MAPPER.readValue(file.toFile(), CursorState.class);
             return state != null ? state : CursorState.empty();
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to read audit cursor file " + cursorFile, e);
+            throw new IllegalStateException("Failed to read audit cursor file " + file, e);
         }
     }
 

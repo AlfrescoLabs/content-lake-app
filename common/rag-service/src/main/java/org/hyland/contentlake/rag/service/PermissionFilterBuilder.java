@@ -81,7 +81,7 @@ class PermissionFilterBuilder {
         List<String> sourceClauses = new ArrayList<>();
         for (String sourceId : sourceIds) {
             String type = sourceCatalog.sourceType(settings.sources(), sourceId);
-            String username = identities.usernameFor(type);
+            String username = identities.usernameFor(sourceId, type);
             if (username == null) {
                 // No identity for this source, so exclude it from results entirely.
                 continue;

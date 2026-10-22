@@ -4,7 +4,9 @@ import lombok.RequiredArgsConstructor;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriUtils;
@@ -23,6 +25,14 @@ public class SourceMetadataResolver {
 
     private final RagProperties ragProperties;
     private final Environment environment;
+
+    /** Per-source link templates (#187). Optional: absent in unit tests, where only the type templates apply. */
+    private SourceRegistry sourceRegistry;
+
+    @Autowired(required = false)
+    void setSourceRegistry(SourceRegistry sourceRegistry) {
+        this.sourceRegistry = sourceRegistry;
+    }
 
     public SourceDocument resolveSourceDocument(String docId, HxprDocument doc) {
         Map<String, Object> ingestProperties = doc.getCinIngestProperties() != null
@@ -77,7 +87,8 @@ public class SourceMetadataResolver {
 
         if (SOURCE_TYPE_ALFRESCO.equalsIgnoreCase(sourceType)) {
             return applyTemplate(
-                    ragProperties.getSourceLinks().getAlfrescoTemplate(),
+                    templateFor(cinSourceId, ragProperties.getSourceLinks().getAlfrescoTemplate(),
+                            "${content.service.url}"),
                     placeholders,
                     Set.of("nodeId")
             );
@@ -85,13 +96,30 @@ public class SourceMetadataResolver {
 
         if (SOURCE_TYPE_NUXEO.equalsIgnoreCase(sourceType)) {
             return applyTemplate(
-                    ragProperties.getSourceLinks().getNuxeoTemplate(),
+                    templateFor(cinSourceId, ragProperties.getSourceLinks().getNuxeoTemplate(),
+                            "${nuxeo.base-url}"),
                     placeholders,
                     Set.of("nuxeoPath")
             );
         }
 
         return null;
+    }
+
+    /**
+     * The template for one document's source: the source's own template, else the type's template with the
+     * type's base URL replaced by the source's own URL, so a document from a second repository never links into
+     * the first (#187). Without a configured entry for the source, the type's template as it is.
+     */
+    private String templateFor(String cinSourceId, String typeTemplate, String typeBaseUrlPlaceholder) {
+        if (sourceRegistry == null) {
+            return typeTemplate;
+        }
+        return sourceRegistry.byId(extractSourceId(cinSourceId))
+                .map(source -> source.linkTemplate() != null
+                        ? source.linkTemplate()
+                        : typeTemplate == null ? null : typeTemplate.replace(typeBaseUrlPlaceholder, source.url()))
+                .orElse(typeTemplate);
     }
 
     private String applyTemplate(String template, Map<String, String> placeholders, Set<String> requiredKeys) {

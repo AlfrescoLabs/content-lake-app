@@ -24,6 +24,9 @@ nuxeo:
   base-url: ${NUXEO_URL:http://localhost:8081/nuxeo}
   username: ${NUXEO_USERNAME:Administrator}
   password: ${NUXEO_PASSWORD:Administrator}
+  # Second half of cin_sourceId (nuxeo:<source-id>) and the ACL principal namespace. Give each Nuxeo
+  # repository its own: two sources left on the default share documents and delete each other's in the
+  # sweep. A warning is logged at startup while it is the default.
   source-id: ${NUXEO_SOURCE_ID:local}
   blob-xpath: ${NUXEO_BLOB_XPATH:file:content}
   conversion:
@@ -44,7 +47,12 @@ nuxeo:
       initial-delay: ${NUXEO_LIVE_AUDIT_INITIAL_DELAY:10s}
       initial-lookback: ${NUXEO_LIVE_AUDIT_INITIAL_LOOKBACK:5m}
       page-size: ${NUXEO_LIVE_AUDIT_PAGE_SIZE:100}
-      cursor-file: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:/data/audit-cursor.json}
+      # One cursor file per source: empty cursor-file means <cursor-dir>/audit-cursor-<NUXEO_SOURCE_ID>.json,
+      # so two live ingesters sharing a volume never overwrite each other's position. A set cursor-file is
+      # used as given. The shared <cursor-dir>/audit-cursor.json is read once for this source's key, so an
+      # upgrade resumes where it was instead of replaying the audit log.
+      cursor-file: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:}
+      cursor-dir: ${NUXEO_LIVE_AUDIT_CURSOR_DIR:/data}
     embedding:
       min-chunk-size: ${EMBEDDING_MIN_CHUNK_SIZE:200}
       chunk-size: ${EMBEDDING_CHUNK_SIZE:512}

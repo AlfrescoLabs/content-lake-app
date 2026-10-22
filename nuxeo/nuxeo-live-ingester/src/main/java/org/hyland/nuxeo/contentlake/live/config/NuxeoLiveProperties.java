@@ -20,7 +20,13 @@ public class NuxeoLiveProperties {
         private Duration initialDelay = Duration.ofSeconds(10);
         private Duration initialLookback = Duration.ofMinutes(5);
         private int pageSize = 100;
-        private String cursorFile = "/data/audit-cursor.json";
+        /**
+         * Explicit cursor file. Empty means {@code <cursorDir>/audit-cursor-<sourceId>.json}, so two
+         * ingesters sharing a volume never write the same file.
+         */
+        private String cursorFile = "";
+        /** Directory of the per-source cursor file, and of the legacy shared {@code audit-cursor.json}. */
+        private String cursorDir = "/data";
     }
 
     @Data

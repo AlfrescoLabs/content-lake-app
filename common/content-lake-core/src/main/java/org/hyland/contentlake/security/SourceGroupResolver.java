@@ -44,6 +44,15 @@ public interface SourceGroupResolver {
     String sourceType();
 
     /**
+     * The bare source id this resolver's directory belongs to, or {@code null} when it answers for every
+     * source of its type. Two repositories of one type each need a resolver with their own id, because one
+     * repository's groups say nothing about another's (#184).
+     */
+    default String sourceId() {
+        return null;
+    }
+
+    /**
      * The caller's groups in this directory, or {@code null} when the directory holds no such identity.
      *
      * @throws RuntimeException when the directory could not be asked

@@ -85,9 +85,19 @@ content:
         username: ${ALFRESCO_INTERNAL_USERNAME:admin}
         password: ${ALFRESCO_INTERNAL_PASSWORD:admin}
   lake:
+    # Source id written to cin_sourceId and used as the ACL principal namespace (<user>_#_<sourceId>).
+    # Empty means the Alfresco Discovery repository id. Set it when two repositories share a repository
+    # id (for example a copy restored from another's volumes), or their documents overwrite each other.
+    # Changing it on an existing index means re-ingesting this repository. Use the same value on the batch
+    # and the live ingester of one repository.
+    source-id: ${ALFRESCO_SOURCE_ID:}
     permission:
       sync:
         queue-name: ${CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME:contentlake.acl.changed}
+        # The ACL listener selects only this repository's messages (repositoryId = <Discovery repository id>)
+        # and those that name no repository, so two batch ingesters can share one broker and queue. It
+        # starts once the repository id is known; until then it retries at this interval.
+        start-retry-interval-ms: ${CONTENT_LAKE_PERMISSION_SYNC_START_RETRY_INTERVAL_MS:5000}
 
 # hxpr Content Lake connection
 hxpr:

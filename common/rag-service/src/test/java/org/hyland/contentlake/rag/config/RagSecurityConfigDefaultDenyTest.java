@@ -3,6 +3,7 @@ package org.hyland.contentlake.rag.config;
 import org.hyland.contentlake.rag.security.AlfrescoDirectory;
 import org.hyland.contentlake.rag.security.MultiSourceAuthenticationProvider;
 import org.hyland.contentlake.rag.security.NuxeoDirectory;
+import org.hyland.contentlake.rag.security.SourceCredentialChecker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -42,6 +43,12 @@ class RagSecurityConfigDefaultDenyTest {
 
     @MockitoBean
     private NuxeoDirectory nuxeoDirectory;
+
+    @MockitoBean
+    private SourceCredentialChecker sourceCredentialChecker;
+
+    @MockitoBean
+    private SourceRegistry sourceRegistry;
 
     @Test
     void sensitiveActuatorEndpoint_requiresAuthentication() throws Exception {

@@ -57,6 +57,13 @@ nuxeo:
   password: ${NUXEO_PASSWORD:Administrator}
   source-id: ${NUXEO_SOURCE_ID:}
 
+# Repositories (#181). Empty: one Alfresco entry from content.service.* and one Nuxeo entry from nuxeo.*,
+# as above. Two repositories of one type need one entry each, every one with its id (the part of
+# cin_sourceId after "<type>:"). Bind by index from the environment, e.g.
+#   RAG_SOURCES_0_ID=<repository id>  RAG_SOURCES_0_TYPE=alfresco  RAG_SOURCES_0_URL=http://alfresco:8080
+#   RAG_SOURCES_0_SERVICE_USERNAME / _SERVICE_PASSWORD / _LINK_TEMPLATE / _DISPLAY_NAME
+# The list is under rag.sources; see docs/configuration.md, "Repositories".
+
 # hxpr Content Lake connection
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}

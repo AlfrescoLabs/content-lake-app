@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.config.SourceRegistry;
 import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.security.GroupResolutionFailurePolicy;
 import org.hyland.contentlake.security.SourceGroupResolver;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,8 +41,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <h3>Cache</h3>
  *
  * <p>Group membership is a directory round trip per source per query, and a query that runs several
- * expansion variants resolves the same authorities repeatedly. Entries are keyed on
- * {@code (sourceType, username)} and bounded by {@code rag.security.group-cache.ttl-seconds}, which is also
+ * expansion variants resolves the same authorities repeatedly. Entries are keyed on the resolver's source id
+ * (its type, for a resolver that serves every source of the type) and the username, and bounded by {@code rag.security.group-cache.ttl-seconds}, which is also
  * the ceiling on how stale a caller's group membership may be: a user removed from a group keeps reading that
  * group's documents until the entry expires. A TTL of zero disables the cache, as {@code rag.cache} does.
  * Failures are never cached, so a directory outage is retried rather than held for the TTL.</p>
@@ -56,7 +58,11 @@ public class SourceGroupResolverRegistry {
     private static final SourceGroupResolverRegistry WITHOUT_RESOLVERS =
             new SourceGroupResolverRegistry(List.of(), GroupResolutionFailurePolicy.FAIL_CLOSED, 0L, 0L, null);
 
+    /** Resolvers that serve every source of their type. */
     private final Map<String, SourceGroupResolver> resolversByType;
+
+    /** Resolvers bound to one repository, by bare source id (#184). */
+    private final Map<String, SourceGroupResolver> resolversBySource;
     private final GroupResolutionFailurePolicy failurePolicy;
 
     /** Null when {@code rag.security.group-cache.ttl-seconds} is zero. */
@@ -68,8 +74,9 @@ public class SourceGroupResolverRegistry {
     @Autowired
     public SourceGroupResolverRegistry(List<SourceGroupResolver> resolvers,
                                        RagProperties ragProperties,
+                                       SourceRegistry sourceRegistry,
                                        ObjectProvider<MeterRegistry> meterRegistryProvider) {
-        this(resolvers,
+        this(withRepositoryResolvers(resolvers, sourceRegistry),
                 GroupResolutionFailurePolicy.parse(ragProperties.getSecurity().getGroupResolutionFailure()),
                 ragProperties.getSecurity().getGroupCache().getTtlSeconds(),
                 ragProperties.getSecurity().getGroupCache().getMaxSize(),
@@ -87,7 +94,8 @@ public class SourceGroupResolverRegistry {
                                        long cacheMaxSize,
                                        MeterRegistry meterRegistry) {
         this.failurePolicy = failurePolicy;
-        this.resolversByType = index(resolvers);
+        this.resolversByType = indexByType(resolvers);
+        this.resolversBySource = indexBySource(resolvers);
 
         if (cacheTtlSeconds <= 0) {
             this.cache = null;
@@ -102,8 +110,8 @@ public class SourceGroupResolverRegistry {
             }
         }
 
-        log.info("Group resolution: resolvers={}, failurePolicy={}, cacheTtlSeconds={}",
-                resolversByType.keySet(), failurePolicy, cacheTtlSeconds);
+        log.info("Group resolution: resolvers={}, perSource={}, failurePolicy={}, cacheTtlSeconds={}",
+                resolversByType.keySet(), resolversBySource.keySet(), failurePolicy, cacheTtlSeconds);
     }
 
     /** See {@link #WITHOUT_RESOLVERS}. */
@@ -122,7 +130,7 @@ public class SourceGroupResolverRegistry {
         LinkedHashSet<String> authorities =
                 new LinkedHashSet<>(AclFilterBuilder.defaultAuthorities(username));
 
-        SourceGroupResolver resolver = resolverFor(sourceType);
+        SourceGroupResolver resolver = resolverFor(sourceId, sourceType);
         if (resolver == null) {
             warnUnresolvable(sourceId, sourceType);
             return List.copyOf(authorities);
@@ -148,12 +156,16 @@ public class SourceGroupResolverRegistry {
 
     /** Whether a source of this type can have its group membership expanded. */
     public boolean canExpandGroups(String sourceType) {
-        return resolverFor(sourceType) != null;
+        String normalized = normalize(sourceType);
+        return normalized != null && (resolversByType.containsKey(normalized)
+                || resolversBySource.values().stream().anyMatch(r -> normalized.equals(normalize(r.sourceType()))));
     }
 
     /** The source types a resolver is wired for, lower-cased. */
     public Set<String> resolvableSourceTypes() {
-        return resolversByType.keySet();
+        Set<String> types = new LinkedHashSet<>(resolversByType.keySet());
+        resolversBySource.values().forEach(r -> types.add(normalize(r.sourceType())));
+        return Set.copyOf(types);
     }
 
     private GroupLookup groups(SourceGroupResolver resolver, String username) {
@@ -162,7 +174,7 @@ public class SourceGroupResolverRegistry {
         }
         // Not cache.get(key, loader): a loader that throws would be wrapped in a CompletionException,
         // which hides the cause the failure policy logs.
-        CacheKey key = new CacheKey(resolver.sourceType(), username);
+        CacheKey key = new CacheKey(normalize(resolver.sourceType()), resolver.sourceId(), username);
         GroupLookup cached = cache.getIfPresent(key);
         if (cached != null) {
             return cached;
@@ -177,9 +189,43 @@ public class SourceGroupResolverRegistry {
         return groups == null ? GroupLookup.unknownIdentity() : new GroupLookup(List.copyOf(groups), true);
     }
 
-    private SourceGroupResolver resolverFor(String sourceType) {
+    /**
+     * The resolver bound to this source, else the one serving its whole type. A source of a type whose
+     * resolvers are all bound to other repositories gets none: asking a different repository's directory is
+     * exactly the cross-repository leak this registry exists to prevent.
+     */
+    private SourceGroupResolver resolverFor(String sourceId, String sourceType) {
+        if (sourceId != null) {
+            SourceGroupResolver bound = resolversBySource.get(sourceId.trim());
+            if (bound != null) {
+                return bound;
+            }
+        }
         String normalized = normalize(sourceType);
         return normalized == null ? null : resolversByType.get(normalized);
+    }
+
+    /**
+     * The injected resolvers plus one Alfresco or Nuxeo resolver per {@code rag.sources[]} entry, each with
+     * that repository's URL and service account. An entry without an id gives a resolver for its whole
+     * type, which is the single-repository shape every deployment had before (#184).
+     */
+    static List<SourceGroupResolver> withRepositoryResolvers(List<SourceGroupResolver> injected,
+                                                            SourceRegistry sourceRegistry) {
+        List<SourceGroupResolver> all = new ArrayList<>(injected);
+        if (sourceRegistry == null) {
+            return all;
+        }
+        for (SourceRegistry.Source source : sourceRegistry.all()) {
+            switch (source.type()) {
+                case SourceRegistry.ALFRESCO -> all.add(new AlfrescoGroupResolver(source.url(),
+                        source.serviceUsername(), source.servicePassword(), source.id()));
+                case SourceRegistry.NUXEO -> all.add(new NuxeoGroupResolver(source.url(),
+                        source.serviceUsername(), source.servicePassword(), source.id()));
+                default -> log.debug("No built-in group resolver for source type {}", source.type());
+            }
+        }
+        return all;
     }
 
     /**
@@ -197,7 +243,7 @@ public class SourceGroupResolverRegistry {
         log.warn("Source {} (type {}) has no group resolver, so its permission clause carries only the "
                         + "caller's own authorities: public documents and documents granted to the user by "
                         + "name are retrievable, group-granted documents are not. Resolvers are wired for "
-                        + "{}. See docs/deployment-rag.md",
+                        + "{}. See https://github.com/AlfrescoLabs/content-lake-app-deployment/blob/main/docs/deployment-rag.md",
                 sourceId, sourceType == null ? "unknown" : sourceType, resolversByType.keySet());
     }
 
@@ -219,13 +265,16 @@ public class SourceGroupResolverRegistry {
         return List.of();
     }
 
-    private static Map<String, SourceGroupResolver> index(List<SourceGroupResolver> resolvers) {
+    private static Map<String, SourceGroupResolver> indexByType(List<SourceGroupResolver> resolvers) {
         Map<String, SourceGroupResolver> byType = new LinkedHashMap<>();
         for (SourceGroupResolver resolver : resolvers) {
             String type = normalize(resolver.sourceType());
             if (type == null) {
                 throw new IllegalStateException(
                         resolver.getClass().getName() + " declares a blank sourceType()");
+            }
+            if (resolver.sourceId() != null) {
+                continue;
             }
             SourceGroupResolver previous = byType.put(type, resolver);
             if (previous != null) {
@@ -236,6 +285,22 @@ public class SourceGroupResolverRegistry {
             }
         }
         return Map.copyOf(byType);
+    }
+
+    private static Map<String, SourceGroupResolver> indexBySource(List<SourceGroupResolver> resolvers) {
+        Map<String, SourceGroupResolver> bySource = new LinkedHashMap<>();
+        for (SourceGroupResolver resolver : resolvers) {
+            String sourceId = resolver.sourceId();
+            if (sourceId == null) {
+                continue;
+            }
+            SourceGroupResolver previous = bySource.put(sourceId.trim(), resolver);
+            if (previous != null) {
+                throw new IllegalStateException("Two group resolvers claim source '" + sourceId + "': "
+                        + previous.getClass().getName() + " and " + resolver.getClass().getName());
+            }
+        }
+        return Map.copyOf(bySource);
     }
 
     private static String normalize(String sourceType) {
@@ -250,7 +315,7 @@ public class SourceGroupResolverRegistry {
      * A cache entry's identity. A record rather than a joined string, so no source type or username can be
      * spelled in a way that collides with another pair, and one caller cannot be served another's membership.
      */
-    private record CacheKey(String sourceType, String username) {
+    private record CacheKey(String sourceType, String sourceId, String username) {
     }
 
     /**

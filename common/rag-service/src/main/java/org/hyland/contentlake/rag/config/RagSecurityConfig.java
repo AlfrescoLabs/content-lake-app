@@ -10,8 +10,11 @@ import org.hyland.contentlake.rag.security.NuxeoDirectory;
 import org.hyland.contentlake.rag.security.NuxeoTokenAuthenticationFilter;
 import org.hyland.contentlake.rag.security.RagAuthenticationEntryPoint;
 import org.hyland.contentlake.rag.security.RateLimitFilter;
+import org.hyland.contentlake.rag.security.SourceCredentialChecker;
+import org.hyland.contentlake.rag.security.SourceHeaderAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.Customizer;
@@ -32,19 +35,41 @@ import org.springframework.security.web.authentication.www.BasicAuthenticationFi
 @EnableWebSecurity
 public class RagSecurityConfig {
 
+    /**
+     * {@code GET /api/rag/sources} on its own chain: public, and with no authentication filter at all, so a
+     * stale credential a UI still attaches cannot turn the login screen's source list into a 401 (#190). It
+     * returns no URL and no service account.
+     */
+    @Bean
+    @Order(0)
+    SecurityFilterChain sourceListFilterChain(HttpSecurity http) throws Exception {
+        return http
+                .securityMatcher("/api/rag/sources")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .build();
+    }
+
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                             AuthenticationManager authenticationManager,
                                             MultiSourceAuthenticationProvider provider,
                                             AlfrescoDirectory alfrescoDirectory,
                                             NuxeoDirectory nuxeoDirectory,
+                                            SourceCredentialChecker sourceCredentialChecker,
+                                            SourceRegistry sourceRegistry,
                                             RagProperties ragProperties) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(provider)
-                .addFilterBefore(new DualSourceAuthenticationFilter(alfrescoDirectory, nuxeoDirectory),
+                // First, so one credential per source (#190) wins over the per-type headers when both are sent.
+                .addFilterBefore(new SourceHeaderAuthenticationFilter(sourceRegistry, sourceCredentialChecker),
+                        BasicAuthenticationFilter.class)
+                .addFilterBefore(new DualSourceAuthenticationFilter(alfrescoDirectory, nuxeoDirectory,
+                                sourceCredentialChecker),
                         BasicAuthenticationFilter.class)
                 // Before Basic, and it only ever reads a Bearer scheme, so a Basic credential passes through
                 // untouched. Registered unconditionally: with no Entra authenticator present a bearer token
