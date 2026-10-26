@@ -273,6 +273,10 @@ rag:
       # Appended to a bare username to form the Entra identity, since a caller's repository username is not
       # necessarily their Entra one. Anything already containing @ is left alone.
       username-suffix: ${RAG_SECURITY_ENTRA_USERNAME_SUFFIX:}
+      # user asks Graph for the caller's own groups, which needs a user-read permission besides
+      # GroupMember.Read.All. group asks each group an indexed document is granted to whether the caller is a
+      # member, which needs GroupMember.Read.All only but matches a caller known by object id only.
+      membership-lookup: ${RAG_SECURITY_ENTRA_MEMBERSHIP_LOOKUP:user}
       # Caller authentication from an Entra-issued bearer token (#168), so a SharePoint user signs in as
       # themselves. Separate from the resolver above and separately enabled, because they belong to two
       # different app registrations: the resolver uses a service credential (content-lake-service), this

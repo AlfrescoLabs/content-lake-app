@@ -5,7 +5,11 @@ import com.microsoft.aad.msal4j.ClientCredentialParameters;
 import com.microsoft.aad.msal4j.ConfidentialClientApplication;
 import com.microsoft.aad.msal4j.IClientCredential;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.client.HxprService;
+import org.hyland.contentlake.model.HxprTermsAggregationResult;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.security.SourceGroupResolver;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,8 +23,10 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -51,6 +57,13 @@ import java.util.function.Supplier;
  * case of one tenant whose UPNs are {@code <samAccountName>@<domain>}. Anything more elaborate is a real
  * identity-mapping problem and out of scope here; the safe outcome is the one Graph already gives, a 404,
  * which this reports as "no such identity" so the caller keeps the source with their default authorities.</p>
+ *
+ * <h3>Two ways to ask</h3>
+ * <p>{@code rag.security.entra.membership-lookup=user}, the default, asks for the caller's own membership.
+ * That needs a user-read permission besides {@code GroupMember.Read.All}. {@code group} asks each group an
+ * indexed document is granted to whether the caller is a member, which needs only
+ * {@code GroupMember.Read.All} but matches a caller known by object id only. See
+ * {@link EntraGroupCentricLookup}.</p>
  */
 @Slf4j
 @Component
@@ -58,7 +71,10 @@ import java.util.function.Supplier;
 public class EntraGroupResolver implements SourceGroupResolver {
 
     /** Matches what a Graph connector writes into the ACL. Core reads the prefix as "this is a group". */
-    private static final String GROUP_PREFIX = "GROUP_";
+    static final String GROUP_PREFIX = "GROUP_";
+
+    /** Enough distinct group principals for any corpus this lookup is meant for. */
+    private static final int MAX_GROUP_PRINCIPALS = 1000;
 
     private static final String DEFAULT_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
     private static final String GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default";
@@ -74,6 +90,8 @@ public class EntraGroupResolver implements SourceGroupResolver {
     private final Supplier<String> accessToken;
     private final String sourceType;
     private final String usernameSuffix;
+    /** Null in the default {@code user} lookup. */
+    private final EntraGroupCentricLookup groupCentric;
 
     // @Autowired is required, not decoration: this class has a second, package-private constructor for
     // tests, and Spring only infers a constructor when there is exactly one. Without the annotation it looks
@@ -90,24 +108,64 @@ public class EntraGroupResolver implements SourceGroupResolver {
             @Value("${rag.security.entra.auth-mode:client-credentials}") String authMode,
             @Value("${rag.security.entra.access-token:}") String staticToken,
             @Value("${rag.security.entra.source-type:sharepoint}") String sourceType,
-            @Value("${rag.security.entra.username-suffix:}") String usernameSuffix) {
+            @Value("${rag.security.entra.username-suffix:}") String usernameSuffix,
+            @Value("${rag.security.entra.membership-lookup:user}") String membershipLookup,
+            @Value("${rag.security.group-cache.ttl-seconds:300}") long cacheTtlSeconds,
+            ObjectProvider<HxprService> hxprService) {
         this(RestClient.builder().baseUrl(trimTrailingSlash(graphBaseUrl))
                         .defaultHeaders(headers -> headers.setAccept(List.of(MediaType.APPLICATION_JSON)))
                         .build(),
                 tokenSupplier(authMode, tenantId, clientId, clientSecret, certificatePath,
                         certificatePassword, staticToken),
-                sourceType, usernameSuffix);
-        log.info("Entra group resolver active for source type '{}' against {}", this.sourceType,
-                trimTrailingSlash(graphBaseUrl));
+                sourceType, usernameSuffix,
+                groupCentric(membershipLookup) ? () -> indexedGroupPrincipals(hxprService.getObject()) : null,
+                cacheTtlSeconds);
+        log.info("Entra group resolver active for source type '{}' against {}, membership lookup '{}'",
+                this.sourceType, trimTrailingSlash(graphBaseUrl), groupCentric == null ? "user" : "group");
     }
 
     /** Test seam: a fixed client and token, so the tests exercise the paging and the three answers. */
     EntraGroupResolver(RestClient restClient, Supplier<String> accessToken, String sourceType,
                        String usernameSuffix) {
+        this(restClient, accessToken, sourceType, usernameSuffix, null, 0);
+    }
+
+    /**
+     * Test seam for the {@code group} lookup.
+     *
+     * @param indexedPrincipals the distinct {@code sys_racl} values, or null for the {@code user} lookup
+     */
+    EntraGroupResolver(RestClient restClient, Supplier<String> accessToken, String sourceType,
+                       String usernameSuffix, Supplier<Collection<String>> indexedPrincipals,
+                       long cacheTtlSeconds) {
         this.restClient = restClient;
         this.accessToken = accessToken;
         this.sourceType = sourceType == null || sourceType.isBlank() ? "sharepoint" : sourceType.trim();
         this.usernameSuffix = usernameSuffix == null ? "" : usernameSuffix.trim();
+        this.groupCentric = indexedPrincipals == null ? null
+                : new EntraGroupCentricLookup(restClient, accessToken, indexedPrincipals, cacheTtlSeconds);
+    }
+
+    static boolean groupCentric(String membershipLookup) {
+        String mode = membershipLookup == null ? "user" : membershipLookup.trim().toLowerCase(Locale.ROOT);
+        return switch (mode) {
+            case "", "user" -> false;
+            case "group" -> true;
+            default -> throw new IllegalStateException("rag.security.entra.membership-lookup must be user or "
+                    + "group, not '" + membershipLookup + "'");
+        };
+    }
+
+    /** The distinct group principals in {@code sys_racl}, across every source. */
+    private static Collection<String> indexedGroupPrincipals(HxprService hxprService) {
+        HxprTermsAggregationResult aggregation = hxprService.termsAggregation(null, AclFilterBuilder.RACL_FIELD,
+                GROUP_PREFIX, MAX_GROUP_PRINCIPALS);
+        if (aggregation == null || aggregation.getAggregationsBuckets() == null) {
+            return List.of();
+        }
+        return aggregation.getAggregationsBuckets().stream()
+                .map(HxprTermsAggregationResult.Bucket::getKey)
+                .toList();
     }
 
     @Override
@@ -128,6 +186,16 @@ public class EntraGroupResolver implements SourceGroupResolver {
             return null;
         }
         String identity = entraIdentity(username);
+        if (groupCentric != null) {
+            if (!isObjectId(identity)) {
+                // Group members carry only an object id under GroupMember.Read.All, so nothing can match.
+                log.debug("Entra group lookup needs an object id, not '{}'; resolving no groups", identity);
+                return null;
+            }
+            List<String> groups = groupCentric.groupsOf(identity);
+            log.debug("Entra resolved {} group(s) for '{}' from the groups' side", groups.size(), identity);
+            return groups;
+        }
         Set<String> groups = new LinkedHashSet<>();
         String uri = "/users/" + identity + "/transitiveMemberOf/microsoft.graph.group?$select=id";
 
@@ -308,6 +376,7 @@ public class EntraGroupResolver implements SourceGroupResolver {
     @Override
     public String toString() {
         return "EntraGroupResolver(sourceType=" + sourceType
-                + (usernameSuffix.isEmpty() ? "" : ", usernameSuffix=" + usernameSuffix) + ")";
+                + (usernameSuffix.isEmpty() ? "" : ", usernameSuffix=" + usernameSuffix)
+                + (groupCentric == null ? "" : ", membershipLookup=group") + ")";
     }
 }

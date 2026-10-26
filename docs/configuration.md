@@ -444,6 +444,13 @@ logs how many documents this affects, and how many depend on site-local principa
 expand. `sharepoint.group-grants=skip` omits group principals entirely instead; there is deliberately no
 setting that widens a group grant to the whole tenant.
 
+**SharePoint site groups are not expanded.** A document that inherits the site's permissions is granted to
+the site's Owners, Members and Visitors groups, and those are site-local principals. Microsoft Graph does not
+list their members, and SharePoint REST, which does, refuses app-only tokens obtained with a client secret. A
+site Member or Visitor with no other grant therefore cannot retrieve such a document; users named in a grant,
+such as the site owner, can. To make a library searchable by its members, also share it with an Entra ID or
+Microsoft 365 group that holds them.
+
 `sharepoint.acl-fallback` decides what happens to an item whose permissions cannot be read: `fail-closed`
 does not ingest it, `public` makes it readable by everyone. There is no `sync-account` option as there is for
 CMIS, because app-only auth has no user account whose access could stand in for a document's.
@@ -849,16 +856,28 @@ rag:
       auth-mode: ${RAG_SECURITY_ENTRA_AUTH_MODE:client-credentials}
       access-token: ${RAG_SECURITY_ENTRA_ACCESS_TOKEN:}
       username-suffix: ${RAG_SECURITY_ENTRA_USERNAME_SUFFIX:}
+      membership-lookup: ${RAG_SECURITY_ENTRA_MEMBERSHIP_LOOKUP:user}
 ```
 
 | Setting | Effect |
 |---|---|
 | `enabled` | Whether the bean exists at all. Without it, a SharePoint document granted only to a group is retrievable by nobody |
 | `source-type` | Which source type this resolver answers for. Only worth changing if a connector reports a different type |
-| `tenant-id` / `client-id` | Required when enabled. A separate app registration from the connector's is fine, and needs `GroupMember.Read.All` or equivalent to read membership |
+| `tenant-id` / `client-id` | Required when enabled. A separate app registration from the connector's is fine. It needs application `GroupMember.Read.All`, plus `User.ReadBasic.All` (or `User.Read.All`) for the default `membership-lookup` |
 | `client-secret` / `certificate-path` | Exactly one of the two. A certificate is preferred: a secret expires on a date nobody diarises |
 | `auth-mode` | `client-credentials` (app-only) or `static-token`, the latter for a local run against the mock Graph service, since msal4j refuses an authority that is not `https` |
 | `username-suffix` | Appended to a bare username to form the Entra identity, so a caller known to the repository as `sarah` is looked up as `sarah@contoso.com`. Anything already containing `@` is left alone |
+| `membership-lookup` | `user` (default) or `group`. See below |
+
+**`membership-lookup`.** `user` calls the endpoint above. Every call under `/users/` answers 403 without a
+user-read permission, by UPN and by object id alike, so `GroupMember.Read.All` alone is not enough for it.
+`group` needs only `GroupMember.Read.All`: it takes the `GROUP_<objectId>` principals the index holds
+(a terms aggregation on `sys_racl`), reads each group's `/groups/{id}/transitiveMembers?$select=id`, and returns
+the groups whose members include the caller. Under that permission a member carries its object id and nothing
+else, so `group` matches only a caller known by object id, which is what an Entra-signed-in caller is. A caller
+known by a UPN gets "no such identity", which costs them this source's group grants and nothing more. A group
+no indexed document names is never asked about, since it cannot change what anyone may read. Member lists are
+kept for the `group-cache` TTL; a deleted group (404) counts as having no members.
 
 It consumes the same `group-cache` and `group-resolution-failure` settings as the other two resolvers, so a
 membership change takes effect within the cache TTL and a Graph outage costs what

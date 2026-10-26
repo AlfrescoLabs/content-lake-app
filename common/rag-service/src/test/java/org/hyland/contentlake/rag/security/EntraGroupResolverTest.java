@@ -12,7 +12,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -251,8 +255,153 @@ class EntraGroupResolverTest {
         // there is exactly one. Without the annotation the bean failed to build, which took the resolver
         // registry and the whole service down at startup. Nothing in this file could have caught that, since
         // every test here calls the test constructor directly.
-        assertThat(EntraGroupResolver.class.getDeclaredConstructors()).hasSize(2);
+        assertThat(EntraGroupResolver.class.getDeclaredConstructors()).hasSize(3);
         assertThat(autowired).isEqualTo(1);
+    }
+
+    // --- membership-lookup=group: from the groups' side, for a caller known by object id ---
+
+    private static final String CALLER_OID = "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f";
+    private static final String GROUP_A = "6a1f0e2d-8b3c-4d5e-a6f7-0b1c2d3e4f5a";
+    private static final String GROUP_B = "9c8b7a6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+    private EntraGroupResolver groupLookupResolver(Supplier<Collection<String>> principals, long ttlSeconds) {
+        server.start();
+        RestClient client = RestClient.builder()
+                .baseUrl(baseUrl)
+                .defaultHeaders(headers -> headers.setAccept(List.of(MediaType.APPLICATION_JSON)))
+                .build();
+        return new EntraGroupResolver(client, () -> "test-token", "sharepoint", "", principals, ttlSeconds);
+    }
+
+    private static String members(String... ids) {
+        List<String> entries = new ArrayList<>();
+        for (String id : ids) {
+            entries.add("{\"@odata.type\":\"#microsoft.graph.user\",\"id\":\"" + id + "\"}");
+        }
+        return "{\"value\":[" + String.join(",", entries) + "]}";
+    }
+
+    @Test
+    void groupLookupReturnsOnlyTheIndexedGroupsTheCallerIsIn() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 200, members("someone-else", CALLER_OID)));
+        handle("/v1.0/groups/" + GROUP_B, ex -> respond(ex, 200, members("someone-else")));
+        EntraGroupResolver resolver = groupLookupResolver(() -> List.of(
+                "g:GROUP_" + GROUP_A + "_#_my-site",
+                "g:GROUP_" + GROUP_B + "_#_my-site",
+                "u:" + CALLER_OID + "_#_my-site",
+                "__Everyone__"), 0);
+
+        assertThat(resolver.resolveGroups(CALLER_OID)).containsExactly("GROUP_" + GROUP_A);
+        assertThat(requestLog).allMatch(uri -> uri.contains("/transitiveMembers?$select=id"));
+        assertThat(requestLog).noneMatch(uri -> uri.contains("/users/"));
+    }
+
+    @Test
+    void groupLookupMatchesAnObjectIdWhateverItsCase() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 200, members(CALLER_OID)));
+        EntraGroupResolver resolver = groupLookupResolver(
+                () -> List.of("g:GROUP_" + GROUP_A + "_#_my-site"), 0);
+
+        assertThat(resolver.resolveGroups(CALLER_OID.toUpperCase())).containsExactly("GROUP_" + GROUP_A);
+    }
+
+    @Test
+    void groupLookupFollowsEveryPageOfAGroupsMembers() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> {
+            if (ex.getRequestURI().toString().contains("skiptoken")) {
+                respond(ex, 200, members(CALLER_OID));
+            } else {
+                respond(ex, 200, "{\"value\":[{\"id\":\"someone-else\"}],\"@odata.nextLink\":\""
+                        + baseUrl + "/groups/" + GROUP_A + "/transitiveMembers?$select=id&$skiptoken=p2\"}");
+            }
+        });
+        EntraGroupResolver resolver = groupLookupResolver(
+                () -> List.of("g:GROUP_" + GROUP_A + "_#_my-site"), 0);
+
+        assertThat(resolver.resolveGroups(CALLER_OID)).containsExactly("GROUP_" + GROUP_A);
+        assertThat(requestLog).hasSize(2);
+    }
+
+    @Test
+    void groupLookupAnswersNoSuchIdentityForACallerKnownByUpn() {
+        AtomicInteger asked = new AtomicInteger();
+        EntraGroupResolver resolver = groupLookupResolver(() -> {
+            asked.incrementAndGet();
+            return List.of("g:GROUP_" + GROUP_A + "_#_my-site");
+        }, 0);
+
+        // Members carry only an object id, so a UPN can match nothing; null keeps the caller's other grants.
+        assertThat(resolver.resolveGroups("sarah@contoso.com")).isNull();
+        assertThat(asked).hasValue(0);
+        assertThat(requestLog).isEmpty();
+    }
+
+    @Test
+    void groupLookupTreatsADeletedGroupAsHavingNoMembers() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 404, "{\"error\":{\"code\":\"Request_ResourceNotFound\"}}"));
+        handle("/v1.0/groups/" + GROUP_B, ex -> respond(ex, 200, members(CALLER_OID)));
+        EntraGroupResolver resolver = groupLookupResolver(() -> List.of(
+                "g:GROUP_" + GROUP_A + "_#_my-site", "g:GROUP_" + GROUP_B + "_#_my-site"), 0);
+
+        assertThat(resolver.resolveGroups(CALLER_OID)).containsExactly("GROUP_" + GROUP_B);
+    }
+
+    @Test
+    void groupLookupThrowsWhenTheDirectoryRefuses() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 403, "{\"error\":{\"code\":\"Authorization_RequestDenied\"}}"));
+        EntraGroupResolver resolver = groupLookupResolver(
+                () -> List.of("g:GROUP_" + GROUP_A + "_#_my-site"), 0);
+
+        // A refusal is "the directory could not be asked", which the failure policy prices; never a null.
+        assertThatThrownBy(() -> resolver.resolveGroups(CALLER_OID)).isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void groupLookupKeepsMemberListsForTheCacheWindow() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 200, members(CALLER_OID)));
+        AtomicInteger asked = new AtomicInteger();
+        EntraGroupResolver resolver = groupLookupResolver(() -> {
+            asked.incrementAndGet();
+            return List.of("g:GROUP_" + GROUP_A + "_#_my-site");
+        }, 300);
+
+        resolver.resolveGroups(CALLER_OID);
+        resolver.resolveGroups(CALLER_OID);
+
+        assertThat(requestLog).hasSize(1);
+        assertThat(asked).hasValue(1);
+    }
+
+    @Test
+    void groupLookupDoesNotKeepAnEmptyCandidateList() {
+        handle("/v1.0/groups/" + GROUP_A, ex -> respond(ex, 200, members(CALLER_OID)));
+        List<List<String>> answers = new ArrayList<>(List.of(
+                List.of(), List.of("g:GROUP_" + GROUP_A + "_#_my-site")));
+        EntraGroupResolver resolver = groupLookupResolver(() -> answers.removeFirst(), 300);
+
+        // An index still ingesting has no group grants yet; the next query must look again.
+        assertThat(resolver.resolveGroups(CALLER_OID)).isEmpty();
+        assertThat(resolver.resolveGroups(CALLER_OID)).containsExactly("GROUP_" + GROUP_A);
+    }
+
+    @Test
+    void groupLookupIgnoresAGroupPrincipalThatIsNotAnObjectId() {
+        EntraGroupResolver resolver = groupLookupResolver(() -> List.of(
+                "g:GROUP_finance_#_alfresco", "g:GROUP_" + GROUP_A), 0);
+
+        assertThat(resolver.resolveGroups(CALLER_OID)).isEmpty();
+        assertThat(requestLog).isEmpty();
+    }
+
+    @Test
+    void membershipLookupAcceptsOnlyUserOrGroup() {
+        assertThat(EntraGroupResolver.groupCentric("user")).isFalse();
+        assertThat(EntraGroupResolver.groupCentric("")).isFalse();
+        assertThat(EntraGroupResolver.groupCentric(" Group ")).isTrue();
+        assertThatThrownBy(() -> EntraGroupResolver.groupCentric("groups"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("membership-lookup");
     }
 
     private interface Handler {
