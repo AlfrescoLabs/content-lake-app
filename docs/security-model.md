@@ -159,6 +159,16 @@ what that one account may read, which is not the caller's answer.
   follow the failure policy above and cost callers the whole source, which is worse than losing the group
   grants alone. Site-local `siteUser` and `siteGroup` principals are unresolvable by any resolver, enabled
   or not, and the connector counts them separately at ingest for that reason.
+- **Entra group membership is read with the service's credential, never the caller's.** `EntraGroupResolver`
+  authenticates app-only, as its own registration, and asks Graph about the name the caller was
+  authenticated as. It never accepts a Graph token from the caller. A caller-supplied token would be a second
+  input with nothing binding it to the first: a caller authenticated as one user could present another, more
+  privileged user's token and read that user's group-granted documents. Because membership is cached by
+  source type and username, the wrong answer would then also serve other requests for that name. Closing the
+  hole would mean checking the token's own identity against the authenticated name, which is more code in the
+  security path to arrive where app-only already is. A delegated mode would also need a registration change,
+  so it saves no permission request. Both `membership-lookup` modes keep this rule: `group` changes which
+  question is asked, not whose credential asks it.
 - **Resolved membership is cached, failures are not.** `rag.security.group-cache.ttl-seconds` (300 by
   default) bounds how stale a caller's membership may be, keyed by source type and username so no
   entry is shared between callers. A directory failure is never cached, so an outage is retried on the
