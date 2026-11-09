@@ -55,7 +55,7 @@ public class ContentLakeMcpServer {
         this.hxprService = hxprService;
     }
 
-    @Tool(name = "secureSearch", description = "ACL-filtered semantic search over Content Lake. Returns "
+    @Tool(name = "secureSearch", description = "ACL-filtered semantic search over the content indexed by App for OpenArch. Returns "
             + "the top document chunks the authenticated user is permitted to read.")
     public String secureSearch(
             @ToolParam(description = "The natural-language search query") String query,

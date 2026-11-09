@@ -26,7 +26,7 @@
     <packaging>jar</packaging>
 
     <name>filesystem-connector</name>
-    <description>Content Lake connector plugin for a local or mounted filesystem directory</description>
+    <description>App for OpenArch connector plugin for a local or mounted filesystem directory</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

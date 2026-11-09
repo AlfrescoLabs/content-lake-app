@@ -21,7 +21,7 @@
     <packaging>jar</packaging>
 
     <name>sample-directory-connector</name>
-    <description>Worked example of a Content Lake connector plugin: ingests a mounted directory</description>
+    <description>Worked example of an App for OpenArch connector plugin: ingests a mounted directory</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

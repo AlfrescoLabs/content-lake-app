@@ -29,7 +29,7 @@
     <packaging>jar</packaging>
 
     <name>cmis-connector</name>
-    <description>Content Lake connector plugin for any CMIS 1.1 repository</description>
+    <description>App for OpenArch connector plugin for any CMIS 1.1 repository</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

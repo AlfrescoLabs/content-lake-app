@@ -1,4 +1,4 @@
-# Content Lake App
+# App for OpenArch
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/projects/jdk/25/)
@@ -10,11 +10,14 @@
 
 **AI-powered semantic search and RAG over Alfresco and Nuxeo content using [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr)**
 
+> [!IMPORTANT]
+> **Not an official Hyland product.** App for OpenArch is not Hyland OpenArch. It is in the [AlfrescoLabs](https://github.com/AlfrescoLabs) organization on GitHub because Hyland does not officially support it. Hyland OpenArch itself is at [github.com/hyland/OpenArch](https://github.com/hyland/OpenArch).
+
 [Features](#features) | [Quick Start](#quick-start) | [Architecture](#architecture) | [Authentication](#authentication) | [API Usage](#api-usage) | [Configuration](#configuration)
 
-## Content Lake Ecosystem
+## App for OpenArch projects
 
-Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into the [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr) engine for hybrid semantic search and RAG.
+Part of the **App for OpenArch** projects -- a PoC for ingesting Alfresco and Nuxeo content into the [Hyland OpenArch](https://github.com/Hyland/OpenArch) (hxpr) engine for hybrid semantic search and RAG. Repository, module and configuration names use `content-lake`.
 
 | Repo | Role |
 |---|---|
@@ -39,7 +42,7 @@ Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo
 
 Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) over Alfresco and Nuxeo content.
 
-Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
+Uses **Hyland OpenArch** (hxpr) as its content store to enable high-quality AI search while:
 
 * Keeping Alfresco and Nuxeo as the sources of truth
 * Enforcing server-side permissions via ACLs
@@ -75,7 +78,7 @@ flowchart TD
     CONB["plugin-batch-ingester<br/>:9096"]
 
     CORE["content-lake-core<br/>Node sync, Transform, Chunk, Embed, ACL<br/>source_modifiedAt idempotency guard"]
-    HXPR["hxpr Content Lake"]
+    HXPR["Hyland OpenArch (hxpr)"]
     RAG["rag-service :9091<br/>Query -> Embed -> Search -> Augment -> LLM"]
 
     ALF --> ALFB
@@ -139,7 +142,7 @@ loads them at runtime.
 - Docker and Docker Compose
 - Alfresco Content Services 25.x+
   - Alfresco Transform Service (for text extraction)
-- hxpr Content Lake (with OAuth2 IDP)
+- Hyland OpenArch (hxpr), with an OAuth2 IDP
 - Docker Model Runner (for embeddings and LLM)
 
 ### Installation
@@ -180,7 +183,7 @@ cd ../content-lake-app-deployment && docker compose up --build
 
 The batch and live ingesters now rely on an Alfresco content model for scope control:
 
-- `cl:indexed` marks a folder subtree as in scope for Content Lake ingestion
+- `cl:indexed` marks a folder subtree as in scope for App for OpenArch ingestion
 - `cl:excludeFromLake` lets a file opt out, or a folder subtree opt out, even when an ancestor folder is indexed
 
 Build artifact:
@@ -202,7 +205,7 @@ If your Alfresco Repository does not yet use `cl:indexed`, the recommended start
    After deployment, restart the repository so `cl:indexed` and `cl:excludeFromLake` are available.
 2. Start `batch-ingester`.
 3. Run a batch synchronization against the folder you want to onboard.
-   The ingester automatically adds `cl:indexed` to each root folder if it is not already present, then performs the initial backfill into Content Lake.
+   The ingester automatically adds `cl:indexed` to each root folder if it is not already present, then performs the initial backfill into Hyland OpenArch.
 4. Start `live-ingester`.
    Live ingestion then keeps that indexed subtree up to date.
 
@@ -225,8 +228,8 @@ This single call marks `SITES_FOLDER_NODE_ID` with `cl:indexed` (if needed) and 
 
 Important:
 
-- `cl:indexed` can also be set directly via the Alfresco Repository nodes API or the Content Lake UI extension; the batch ingester sets it automatically only for root folders passed in the request
-- `cl:excludeFromLake` on a folder removes that folder's full subtree from Content Lake scope; batch discovery skips it and live reconciliation deletes previously ingested descendants
+- `cl:indexed` can also be set directly via the Alfresco Repository nodes API or the App for OpenArch Alfresco UI extension; the batch ingester sets it automatically only for root folders passed in the request
+- `cl:excludeFromLake` on a folder removes that folder's full subtree from App for OpenArch scope; batch discovery skips it and live reconciliation deletes previously ingested descendants
 - if you later want to index only one site, pass that site folder to `/api/sync/batch` instead of `Company Home/Sites`
 
 ### Environment Variables

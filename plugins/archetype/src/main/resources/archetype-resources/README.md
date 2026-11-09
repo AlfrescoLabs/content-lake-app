@@ -1,6 +1,6 @@
 # ${artifactId}
 
-A Content Lake source connector for `${sourceType}`, shipped as a jar. No module in
+An App for OpenArch source connector for `${sourceType}`, shipped as a jar. No module in
 `content-lake-app`, no edit to any service Dockerfile: an ingester scans its plugin directory at startup
 and uses whatever it finds.
 

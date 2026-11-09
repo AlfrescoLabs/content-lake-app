@@ -32,7 +32,7 @@ public class MetadataIngester {
 
         NodeSyncService.SyncResult result = nodeSyncService.ingestMetadata(sourceNode);
         if (result.skipped()) {
-            log.debug("Skipping transformation enqueue for node {} — Content Lake version is already current", node.getId());
+            log.debug("Skipping transformation enqueue for node {} — Hyland OpenArch version is already current", node.getId());
             return null;
         }
 

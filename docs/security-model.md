@@ -31,7 +31,7 @@ flowchart TD
     A["Browser, agent or script"] -->|"HTTP Basic, Alfresco ticket,<br/>Nuxeo token, dual-source headers"| B["rag-service"]
     B -->|"validate credentials"| C["Alfresco / Nuxeo<br/>(source repositories)"]
     B -->|"resolve group membership<br/>with the service account"| C
-    B -->|"HTTP Basic as one administrative<br/>service account + the caller's<br/>permission predicate"| D["AIR Index engine"]
+    B -->|"HTTP Basic as one administrative<br/>service account + the caller's<br/>permission predicate"| D["Hyland OpenArch engine"]
     D --> E["MongoDB + OpenSearch"]
 ```
 

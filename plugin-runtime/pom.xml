@@ -13,7 +13,7 @@
 
     <artifactId>content-lake-plugin-runtime</artifactId>
     <packaging>pom</packaging>
-    <name>Content Lake - Plugin Runtime</name>
+    <name>App for OpenArch - Plugin Runtime</name>
 
     <!--
         Unlike the other groups this one holds no source adapter, and is not expected to grow one: a

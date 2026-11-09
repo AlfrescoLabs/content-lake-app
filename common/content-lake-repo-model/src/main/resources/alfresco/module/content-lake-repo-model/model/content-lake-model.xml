@@ -3,8 +3,8 @@
        xmlns="http://www.alfresco.org/model/dictionary/1.0"
        xmlns:cl="http://www.alfresco.org/model/contentlake/1.0">
 
-    <description>Content Lake scope control model</description>
-    <author>Alfresco Content Lake</author>
+    <description>App for OpenArch scope control model</description>
+    <author>App for OpenArch</author>
     <version>1.0</version>
 
     <imports>
@@ -20,12 +20,12 @@
 
         <!--
           Applied to FOLDERS only. Marks the entire subtree as in scope for
-          Content Lake ingestion. No properties — presence alone defines the
+          App for OpenArch ingestion. No properties — presence alone defines the
           scope boundary.
         -->
         <aspect name="cl:indexed">
-            <title>Content Lake Indexed</title>
-            <description>Marks a folder subtree as in scope for Content Lake ingestion. Presence alone defines the scope boundary.</description>
+            <title>Indexed by App for OpenArch</title>
+            <description>Marks a folder subtree as in scope for App for OpenArch ingestion. Presence alone defines the scope boundary.</description>
         </aspect>
 
         <!--
@@ -34,12 +34,12 @@
           subtree) is skipped even if an ancestor folder has cl:indexed.
         -->
         <aspect name="cl:fileScope">
-            <title>Content Lake Scope Override</title>
-            <description>Allows a file or folder subtree to opt out of Content Lake ingestion even if an ancestor folder has cl:indexed.</description>
+            <title>App for OpenArch Scope Override</title>
+            <description>Allows a file or folder subtree to opt out of App for OpenArch ingestion even if an ancestor folder has cl:indexed.</description>
             <properties>
                 <property name="cl:excludeFromLake">
-                    <title>Exclude From Content Lake</title>
-                    <description>Set to true to opt this node or folder subtree out of Content Lake even if an ancestor folder is indexed.</description>
+                    <title>Exclude From App for OpenArch</title>
+                    <description>Set to true to opt this node or folder subtree out of App for OpenArch even if an ancestor folder is indexed.</description>
                     <type>d:boolean</type>
                     <mandatory>false</mandatory>
                     <default>false</default>
@@ -48,17 +48,17 @@
         </aspect>
 
         <!--
-          Applied to FILES after the Content Lake pipeline processes them.
+          Applied to FILES after the App for OpenArch pipeline processes them.
           Stores the last known sync status so the status API can read it
           directly from the Alfresco node without a secondary hxpr query.
         -->
         <aspect name="cl:syncStatus">
-            <title>Content Lake Sync Status</title>
-            <description>Records the ingestion status of a node in the Content Lake pipeline.</description>
+            <title>App for OpenArch Sync Status</title>
+            <description>Records the ingestion status of a node in the App for OpenArch pipeline.</description>
             <properties>
                 <property name="cl:syncStatusValue">
                     <title>Sync Status</title>
-                    <description>Last known Content Lake sync status: PENDING, INDEXED, or FAILED.</description>
+                    <description>Last known App for OpenArch sync status: PENDING, INDEXED, or FAILED.</description>
                     <type>d:text</type>
                     <mandatory>false</mandatory>
                     <index enabled="true">
@@ -69,7 +69,7 @@
                 </property>
                 <property name="cl:syncError">
                     <title>Sync Error</title>
-                    <description>Error message from the last failed Content Lake ingestion attempt.</description>
+                    <description>Error message from the last failed App for OpenArch ingestion attempt.</description>
                     <type>d:text</type>
                     <mandatory>false</mandatory>
                 </property>

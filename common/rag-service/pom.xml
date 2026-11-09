@@ -13,7 +13,7 @@
 
     <artifactId>rag-service</artifactId>
     <name>RAG Service</name>
-    <description>RAG (Retrieval-Augmented Generation) service for Alfresco Content Lake</description>
+    <description>RAG (Retrieval-Augmented Generation) service for App for OpenArch</description>
 
     <dependencies>
         <dependency>

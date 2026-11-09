@@ -227,7 +227,7 @@ public class NodeSyncService {
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing != null && isStale(existing, node)) {
             refreshPermissions(existing.getSysId(), node);
-            log.debug("Skipping content for node {} — Content Lake version is already current; permissions refreshed", nodeId);
+            log.debug("Skipping content for node {} — Hyland OpenArch version is already current; permissions refreshed", nodeId);
             return existing.getSysId();
         }
 
@@ -421,14 +421,14 @@ public class NodeSyncService {
         String sourceId = formatSourceId(sourceClient.getSourceType(), sourceClient.getSourceId());
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing == null) {
-            log.debug("No Content Lake document found for deleted node {}", nodeId);
+            log.debug("No Hyland OpenArch document found for deleted node {}", nodeId);
             return DeleteOutcome.NOT_FOUND;
         }
 
         OffsetDateTime deletedAt = tombstone.deletedAt();
         OffsetDateTime storedModifiedAt = getStoredModifiedAt(existing);
         if (deletedAt != null && storedModifiedAt != null && storedModifiedAt.isAfter(deletedAt)) {
-            log.info("Skipping delete for node {}: Content Lake document is newer than delete event", nodeId);
+            log.info("Skipping delete for node {}: Hyland OpenArch document is newer than delete event", nodeId);
             return DeleteOutcome.SKIPPED_NEWER;
         }
 
@@ -448,11 +448,11 @@ public class NodeSyncService {
 
         try {
             documentApi.deleteById(documentId);
-            log.info("Deleted Content Lake document {} for node {} ({})",
+            log.info("Deleted Hyland OpenArch document {} for node {} ({})",
                     documentId, nodeId, tombstone.reason());
             return DeleteOutcome.DELETED;
         } catch (Exception e) {
-            log.error("Failed to delete Content Lake document for node {}: {}", nodeId, e.getMessage());
+            log.error("Failed to delete Hyland OpenArch document for node {}: {}", nodeId, e.getMessage());
             return DeleteOutcome.FAILED;
         }
     }
@@ -487,13 +487,13 @@ public class NodeSyncService {
         HxprDocument existing = hxprService.findByNodeId(node.nodeId(), formatSourceId(node));
         if (existing == null) {
             if (node.folder()) {
-                log.debug("Skipping permission-only fallback for folder node {} with no Content Lake document",
+                log.debug("Skipping permission-only fallback for folder node {} with no Hyland OpenArch document",
                         node.nodeId());
                 return;
             }
 
             HxprDocument created = createDocument(node);
-            log.info("Created metadata-only Content Lake document {} during permission update for node {}",
+            log.info("Created metadata-only Hyland OpenArch document {} during permission update for node {}",
                     created.getSysId(), node.nodeId());
             return;
         }
@@ -513,7 +513,7 @@ public class NodeSyncService {
         update.setCinDeny(denyList);
         documentApi.updateById(hxprDocId, update);
 
-        log.info("Updated ACL for Content Lake document {} (node {})", hxprDocId, node.nodeId());
+        log.info("Updated ACL for Hyland OpenArch document {} (node {})", hxprDocId, node.nodeId());
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -12,8 +12,8 @@
     </parent>
 
     <artifactId>content-lake-repo-model</artifactId>
-    <name>Content Lake Repo Model</name>
-    <description>Alfresco repository content model for Content Lake scope control</description>
+    <name>App for OpenArch Repo Model</name>
+    <description>Alfresco repository content model for App for OpenArch scope control</description>
     <packaging>jar</packaging>
 
     <properties>

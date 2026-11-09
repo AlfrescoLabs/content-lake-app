@@ -64,7 +64,7 @@ nuxeo:
 #   RAG_SOURCES_0_SERVICE_USERNAME / _SERVICE_PASSWORD / _LINK_TEMPLATE / _DISPLAY_NAME
 # The list is under rag.sources; see docs/configuration.md, "Repositories".
 
-# hxpr Content Lake connection
+# Hyland OpenArch (hxpr) connection
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}
   repository-id: ${HXPR_REPOSITORY_ID:default}

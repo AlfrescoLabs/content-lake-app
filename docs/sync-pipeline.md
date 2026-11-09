@@ -215,7 +215,7 @@ Each `RepoEvent` is dispatched to a typed handler:
 node within a short window.
 
 Alfresco Repository does not reliably emit permission update events for the ACL changes needed by
-Content Lake. Because of that, Alfresco ACL reconciliation should not rely on the live ingester as
+App for OpenArch. Because of that, Alfresco ACL reconciliation should not rely on the live ingester as
 the primary mechanism. The primary production path is the repository-side `content-lake-repo-model`
 addon, which detects ACL changes after commit and publishes a persistent ActiveMQ queue message.
 `alfresco-batch-ingester` consumes that queue in a transacted listener and executes ACL

@@ -9,9 +9,9 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>maven-archetype</packaging>
 
-    <name>Content Lake Connector Archetype</name>
+    <name>App for OpenArch Connector Archetype</name>
     <description>
-        Generates a source connector for Content Lake: an SPI implementation, its service declaration and a
+        Generates a source connector for App for OpenArch: an SPI implementation, its service declaration and a
         test, ready to build into a jar and drop into an ingester's plugin directory.
 
         Deliberately NOT a module of the root POM, and it lives under plugins/ with everything else the

@@ -12,7 +12,7 @@
     </parent>
 
     <artifactId>content-lake-source-nuxeo</artifactId>
-    <name>Content Lake Source Nuxeo</name>
+    <name>App for OpenArch Source Nuxeo</name>
     <description>Nuxeo-specific source adapter: REST clients, auth, scope resolver, and text extraction</description>
 
     <dependencies>

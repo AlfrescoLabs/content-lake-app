@@ -44,7 +44,7 @@ public class AclChangeCollector implements InitializingBean,
     @Override
     public void afterPropertiesSet() {
         if (!enabled) {
-            log.info("Content Lake ACL change collector is disabled");
+            log.info("App for OpenArch ACL change collector is disabled");
             return;
         }
 
@@ -52,7 +52,7 @@ public class AclChangeCollector implements InitializingBean,
         bind(PermissionServicePolicies.OnRevokeLocalPermission.QNAME, "onRevokeLocalPermission");
         bind(PermissionServicePolicies.OnInheritPermissionsEnabled.QNAME, "onInheritPermissionsEnabled");
         bind(PermissionServicePolicies.OnInheritPermissionsDisabled.QNAME, "onInheritPermissionsDisabled");
-        log.info("Content Lake ACL change collector bound to Alfresco permission policies");
+        log.info("App for OpenArch ACL change collector bound to Alfresco permission policies");
     }
 
     @Override

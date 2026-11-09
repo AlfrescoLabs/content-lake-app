@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
 
     <name>${artifactId}</name>
-    <description>Content Lake source connector for ${sourceType}</description>
+    <description>App for OpenArch source connector for ${sourceType}</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

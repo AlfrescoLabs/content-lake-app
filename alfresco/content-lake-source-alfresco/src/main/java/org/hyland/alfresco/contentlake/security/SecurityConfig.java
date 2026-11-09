@@ -63,7 +63,7 @@ public class SecurityConfig {
                 )
                 .httpBasic(httpBasic -> {
                     httpBasic.authenticationEntryPoint((request, response, authException) -> {
-                        response.setHeader("WWW-Authenticate", "Basic realm=\"Alfresco Content Lake\"");
+                        response.setHeader("WWW-Authenticate", "Basic realm=\"App for OpenArch\"");
                         response.sendError(HttpStatus.UNAUTHORIZED.value(), "Alfresco credentials or ticket required");
                     });
                 })

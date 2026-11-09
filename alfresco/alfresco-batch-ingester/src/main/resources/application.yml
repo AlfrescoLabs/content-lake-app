@@ -99,7 +99,7 @@ content:
         # starts once the repository id is known; until then it retries at this interval.
         start-retry-interval-ms: ${CONTENT_LAKE_PERMISSION_SYNC_START_RETRY_INTERVAL_MS:5000}
 
-# hxpr Content Lake connection
+# Hyland OpenArch (hxpr) connection
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}
   repository-id: ${HXPR_REPOSITORY_ID:default}

@@ -1,4 +1,4 @@
-# Content Lake connector archetype
+# App for OpenArch connector archetype
 
 Generates a source connector project: the SPI implementation, its `META-INF/services` declaration, a
 client stub and tests that pass as generated. The result builds to a jar that any ingester picks up from its
