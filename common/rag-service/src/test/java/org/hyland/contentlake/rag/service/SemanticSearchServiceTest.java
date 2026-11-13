@@ -28,6 +28,7 @@ import java.util.function.Supplier;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -36,6 +37,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 import org.hyland.contentlake.security.CallerIdentities;
+import org.hyland.contentlake.security.UnsafeHxqlFilterException;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -702,5 +704,17 @@ class SemanticSearchServiceTest {
                         && filter.contains("sys_racl = 'u:user_#_nuxeo-demo'")
                         && !filter.contains("u:user_#_test-repo")
         ), anyInt());
+    }
+
+    @Test
+    void search_rejectsAFilterThatEscapesItsGroup_beforeExpansionEmbeddingOrHxpr() {
+        SemanticSearchRequest request = SemanticSearchRequest.builder()
+                .query("anything")
+                .filter("cin_id = \"'\") OR (sys_racl = 'u:bob_#_test-repo' OR cin_id = \"'\"")
+                .build();
+
+        assertThatThrownBy(() -> service.search(request)).isInstanceOf(UnsafeHxqlFilterException.class);
+
+        verifyNoInteractions(queryExpansionService, embeddingService, hxprService);
     }
 }

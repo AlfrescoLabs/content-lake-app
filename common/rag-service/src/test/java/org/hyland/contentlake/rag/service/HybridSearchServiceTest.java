@@ -14,6 +14,7 @@ import org.hyland.contentlake.rag.service.HybridSearchService.ScoredChunk;
 import org.hyland.contentlake.security.CallerIdentities;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.security.UnsafeHxqlFilterException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -1485,5 +1487,17 @@ class HybridSearchServiceTest {
 
             verify(hxprService, never()).vectorSearch(any(), any(), any(), any(), anyInt());
         }
+    }
+
+    @Test
+    void search_rejectsAFilterThatEscapesItsGroup_beforeExpansionEmbeddingOrHxpr() {
+        HybridSearchRequest request = HybridSearchRequest.builder()
+                .query("anything")
+                .filter("cin_id = 'none') OR (sys_racl = 'u:bob_#_test-repo'")
+                .build();
+
+        assertThatThrownBy(() -> service.search(request)).isInstanceOf(UnsafeHxqlFilterException.class);
+
+        verifyNoInteractions(queryExpansionService, embeddingService, hxprService);
     }
 }

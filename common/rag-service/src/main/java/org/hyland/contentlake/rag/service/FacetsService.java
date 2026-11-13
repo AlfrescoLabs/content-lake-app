@@ -6,6 +6,7 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
 import org.hyland.contentlake.rag.model.FacetsRequest;
 import org.hyland.contentlake.rag.model.FacetsResponse;
+import org.hyland.contentlake.security.HxqlFilterGuard;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,6 +34,9 @@ public class FacetsService {
         String property = request.getProperty();
         int topN = request.getTopN() > 0 ? Math.min(request.getTopN(), MAX_TOP_N) : DEFAULT_TOP_N;
 
+        // Reject a caller filter that could escape its group. Facets passes the raw filter straight
+        // into buildCurrentUserPermissionFilter, so it is guarded here rather than in a search method.
+        HxqlFilterGuard.requireSafeFragment(request.getFilter());
         String permissionFilter = hybridSearchService.buildCurrentUserPermissionFilter(
                 request.getSourceType(), request.getFilter());
 

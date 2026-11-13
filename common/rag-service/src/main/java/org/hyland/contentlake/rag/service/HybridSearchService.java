@@ -21,6 +21,7 @@ import org.hyland.contentlake.rag.model.HybridSearchResponse.HybridHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
 import org.hyland.contentlake.security.AclFilterBuilder;
+import org.hyland.contentlake.security.HxqlFilterGuard;
 import org.hyland.contentlake.security.CallerIdentityService;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.service.EmbeddingService;
@@ -174,6 +175,9 @@ public class HybridSearchService {
      * cache key includes the caller's principal scope, so results never cross ACL contexts.</p>
      */
     public HybridSearchResponse search(HybridSearchRequest request) {
+        // Reject a caller filter that could escape its group before it is wrapped and combined, and
+        // before the cache, query expansion or embedding spend anything on it.
+        HxqlFilterGuard.requireSafeFragment(request.getFilter());
         boolean cacheOn = queryCache != null && queryCache.isEnabled();
         String cacheKey = cacheOn ? buildCacheKey(request) : null;
         if (cacheKey != null) {

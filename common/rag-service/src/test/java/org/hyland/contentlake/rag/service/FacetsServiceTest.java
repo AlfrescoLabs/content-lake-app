@@ -4,6 +4,7 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
 import org.hyland.contentlake.rag.model.FacetsRequest;
 import org.hyland.contentlake.rag.model.FacetsResponse;
+import org.hyland.contentlake.security.UnsafeHxqlFilterException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -14,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -111,5 +113,17 @@ class FacetsServiceTest {
         FacetsResponse response = facetsService.facets(FacetsRequest.builder().property("p").build());
 
         assertThat(response.getBuckets()).isEmpty();
+    }
+
+    @Test
+    void facets_rejectsAFilterThatEscapesItsGroup_beforeBuildingThePermissionFilter() {
+        FacetsRequest request = FacetsRequest.builder()
+                .property("p")
+                .filter("cin_id = 'none') OR (sys_racl = 'u:bob_#_repo'")
+                .build();
+
+        assertThatThrownBy(() -> facetsService.facets(request)).isInstanceOf(UnsafeHxqlFilterException.class);
+
+        org.mockito.Mockito.verifyNoInteractions(hybridSearchService, hxprService);
     }
 }

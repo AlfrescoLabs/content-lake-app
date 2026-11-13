@@ -12,6 +12,7 @@ import org.hyland.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
 import org.hyland.contentlake.security.AclFilterBuilder;
+import org.hyland.contentlake.security.HxqlFilterGuard;
 import org.hyland.contentlake.security.CallerIdentityService;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.client.HxprService;
@@ -152,6 +153,9 @@ public class SemanticSearchService {
      * so results are never shared across ACL contexts.
      */
     public SemanticSearchResponse search(SemanticSearchRequest request) {
+        // Reject a caller filter that could escape its group before it is wrapped and combined, and
+        // before the cache, query expansion or embedding spend anything on it.
+        HxqlFilterGuard.requireSafeFragment(request.getFilter());
         boolean cacheOn = queryCache != null && queryCache.isEnabled();
         String cacheKey = cacheOn ? buildCacheKey(request) : null;
         if (cacheKey != null) {
