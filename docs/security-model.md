@@ -40,7 +40,7 @@ flowchart TD
 | Caller to `rag-service` | HTTP Basic, Alfresco ticket, Nuxeo token, or the dual-source header pair, validated against the configured source repositories | the source repository decides *whether you are you* |
 | `rag-service` to the index | HTTP Basic with one service account plus the `HXCS-REPOSITORY` header | nothing; the service account is trusted completely |
 | Permission filtering | an HXQL predicate over `sys_racl`, built per request by `AclFilterBuilder` | `rag-service` decides *what you may read* |
-| Group resolution | one `SourceGroupResolver` per repository (per `rag.sources[]` entry), else per source type, selected by `SourceGroupResolverRegistry` and called with the service account: Alfresco `GET /people/{user}/groups`, Nuxeo `GET /api/v1/user/{username}` | the source repository is the authority on group membership |
+| Group resolution | one `SourceGroupResolver` per repository (per `rag.sources[]` entry), else per source type, selected by `SourceGroupResolverRegistry` and called with the service account: Alfresco `GET /people/{user}/groups`, Nuxeo `GET /api/v1/user/{username}`, any other source the directory its `rag.sources[].groups` block names (`HttpGroupResolver`) | the source repository is the authority on group membership |
 | The engine's own ACL policy | real code, and it runs, but it adds no restriction for an administrative principal | inert for this connection |
 
 Authentication answers a different question from authorization here, and the two live in different
@@ -141,12 +141,20 @@ what that one account may read, which is not the caller's answer.
   repository and not another.
 - **A source with no resolver expands no groups.** `SourceGroupResolverRegistry` selects the resolver
   bound to the source id, else the one serving its whole type. It builds one Alfresco or Nuxeo resolver
-  per `rag.sources[]` entry, with that repository's URL and service account, and ships a `sharepoint`
-  resolver; any other source gets the caller's own authorities only, so group-granted documents on it are
+  per `rag.sources[]` entry, with that repository's URL and service account, ships a `sharepoint`
+  resolver, and builds an `HttpGroupResolver` for an entry of any other type that sets a `groups` block;
+  any other source gets the caller's own authorities only, so group-granted documents on it are
   retrievable by nobody rather than by everybody. A source of a type whose resolvers are all bound to
   other repositories gets none: asking another repository's directory is the leak this prevents.
   Exactly one resolver may claim a source id, and exactly one may serve a whole type; the registry
   refuses to start otherwise, because which of two wins would decide who reads what.
+- **A configured group directory can only add group authorities.** `HttpGroupResolver` gives every name it
+  returns the `GROUP_` prefix (startup refuses a `prefix` without it), because `AclFilterBuilder` matches any
+  other authority as a user: a directory group named `bob` would otherwise read the user `bob`'s documents.
+  It asks about the caller's name on that source, which for a source with no caller authenticator is the
+  fallback identity, so it trusts that the directory's user names are the same people as the names callers
+  sign in with, exactly as the source's by-name grants already do. A malformed answer is a failure, never an
+  empty list.
 - **Two repositories of one type are checked separately.** With two or more `rag.sources[]` entries of a
   type, a password or ticket is checked against each of them, and the caller gets a name only in the
   repositories that accepted it (`SourceCredentialChecker`). A repository that rejected the credential, or

@@ -4,8 +4,11 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Configuration properties for RAG behaviour.
@@ -143,7 +146,10 @@ public class RagProperties {
         /** Bare source id, as stored after {@code <type>:} in {@code cin_sourceId}. */
         private String id;
 
-        /** {@code alfresco} or {@code nuxeo}. */
+        /**
+         * {@code alfresco}, {@code nuxeo}, or a connector plugin's own type. The first two get a built-in
+         * group resolver; any other type expands groups only when {@link #groups} is set.
+         */
         private String type;
 
         /** Base URL the directory and the group resolver call. */
@@ -158,6 +164,50 @@ public class RagProperties {
 
         /** Name a login screen shows. Defaults to the type, plus the id when the type has several sources. */
         private String displayName;
+
+        /**
+         * The directory that answers a caller's group membership for a source with no built-in resolver
+         * (#192). Unset: the source expands no groups, so its group-granted documents are retrievable by
+         * nobody.
+         */
+        private GroupDirectoryProperties groups;
+    }
+
+    /**
+     * A group directory asked over HTTP: {@code GET <url><path>} with the entry's service account, answered
+     * with JSON that holds the caller's groups as an array.
+     */
+    @Data
+    public static class GroupDirectoryProperties {
+
+        /** {@code http}, the only kind so far. */
+        private String kind;
+
+        /**
+         * Path and optional query appended to the entry's {@code url}. Must contain {@code {username}}, which
+         * is replaced by the URL-encoded name the caller has on this source.
+         */
+        private String path;
+
+        /** Extra request headers, for directories that need one (for example {@code OCS-APIRequest}). */
+        private Map<String, String> headers = new LinkedHashMap<>();
+
+        /** JSON Pointer (RFC 6901) to the array of groups. Empty means the response itself is the array. */
+        private String groupsPointer = "";
+
+        /** Field read from each array item that is an object. Unset: every item must be a string. */
+        private String groupField;
+
+        /**
+         * Prefix added to a group name that does not already carry it, so the name matches the form the
+         * connector writes into the ACL. Must start with {@code GROUP_}: the permission filter reads any other
+         * authority as a user name, so an unprefixed group {@code bob} would match documents granted to the
+         * user {@code bob}.
+         */
+        private String prefix = "GROUP_";
+
+        private Duration connectTimeout = Duration.ofSeconds(3);
+        private Duration readTimeout = Duration.ofSeconds(5);
     }
 
     /**

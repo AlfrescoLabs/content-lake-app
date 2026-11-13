@@ -206,9 +206,10 @@ public class SourceGroupResolverRegistry {
     }
 
     /**
-     * The injected resolvers plus one Alfresco or Nuxeo resolver per {@code rag.sources[]} entry, each with
-     * that repository's URL and service account. An entry without an id gives a resolver for its whole
-     * type, which is the single-repository shape every deployment had before (#184).
+     * The injected resolvers plus one resolver per {@code rag.sources[]} entry, each with that repository's
+     * URL and service account: the built-in one for Alfresco and Nuxeo, and an {@link HttpGroupResolver} for
+     * any other type whose entry configures a group directory (#192). An entry without an id gives a
+     * resolver for its whole type, which is the single-repository shape every deployment had before (#184).
      */
     static List<SourceGroupResolver> withRepositoryResolvers(List<SourceGroupResolver> injected,
                                                             SourceRegistry sourceRegistry) {
@@ -222,7 +223,13 @@ public class SourceGroupResolverRegistry {
                         source.serviceUsername(), source.servicePassword(), source.id()));
                 case SourceRegistry.NUXEO -> all.add(new NuxeoGroupResolver(source.url(),
                         source.serviceUsername(), source.servicePassword(), source.id()));
-                default -> log.debug("No built-in group resolver for source type {}", source.type());
+                default -> {
+                    if (source.groups() != null) {
+                        all.add(new HttpGroupResolver(source));
+                    } else {
+                        log.debug("No built-in group resolver for source type {}", source.type());
+                    }
+                }
             }
         }
         return all;
@@ -243,7 +250,8 @@ public class SourceGroupResolverRegistry {
         log.warn("Source {} (type {}) has no group resolver, so its permission clause carries only the "
                         + "caller's own authorities: public documents and documents granted to the user by "
                         + "name are retrievable, group-granted documents are not. Resolvers are wired for "
-                        + "{}. See https://github.com/AlfrescoLabs/content-lake-app-deployment/blob/main/docs/deployment-rag.md",
+                        + "{}. A source of another type can set rag.sources[].groups to name its group "
+                        + "directory. See https://github.com/AlfrescoLabs/content-lake-app-deployment/blob/main/docs/deployment-rag.md",
                 sourceId, sourceType == null ? "unknown" : sourceType, resolversByType.keySet());
     }
 

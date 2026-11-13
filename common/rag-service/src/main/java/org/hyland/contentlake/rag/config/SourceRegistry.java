@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -35,9 +36,18 @@ public class SourceRegistry {
     public static final String ALFRESCO = "alfresco";
     public static final String NUXEO = "nuxeo";
 
-    /** One upstream repository. {@code id} is bare and may be null for the only entry of its type. */
+    /**
+     * One upstream repository. {@code id} is bare and may be null for the only entry of its type.
+     * {@code groups} is the configured group directory, or null when the entry has none (#192).
+     */
     public record Source(String id, String type, String url, String serviceUsername, String servicePassword,
-                         String linkTemplate, String displayName) {
+                         String linkTemplate, String displayName, GroupDirectory groups) {
+
+        /** An entry with no configured group directory. */
+        public Source(String id, String type, String url, String serviceUsername, String servicePassword,
+                      String linkTemplate, String displayName) {
+            this(id, type, url, serviceUsername, servicePassword, linkTemplate, displayName, null);
+        }
 
         /** {@code <type>:<id>} as stored in {@code cin_sourceId}, or null when the id is not configured. */
         public String qualifiedId() {
@@ -51,6 +61,34 @@ public class SourceRegistry {
             }
             String typeLabel = Character.toUpperCase(type.charAt(0)) + type.substring(1);
             return id == null ? typeLabel : typeLabel + " (" + id + ")";
+        }
+    }
+
+    /**
+     * Where a source with no built-in resolver reads a caller's groups: {@code GET <url><path>} with the
+     * entry's service account, {@code {username}} in {@code path} replaced by the URL-encoded caller name.
+     * The array at {@code groupsPointer} holds the groups, as strings or as objects read through
+     * {@code groupField}, and each name gets {@code prefix} unless it already carries it. {@code prefix}
+     * defaults to {@link #GROUP_PREFIX} and must start with it.
+     */
+    public record GroupDirectory(String kind, String path, Map<String, String> headers, String groupsPointer,
+                                 String groupField, String prefix, Duration connectTimeout,
+                                 Duration readTimeout) {
+
+        public static final String HTTP = "http";
+        public static final String USERNAME_PLACEHOLDER = "{username}";
+
+        /**
+         * What every resolved name must start with. {@code AclFilterBuilder} matches an authority as a group
+         * only when it carries this prefix and as a user otherwise, so a group name without it would be
+         * read as the user of the same name.
+         */
+        public static final String GROUP_PREFIX = "GROUP_";
+
+        public GroupDirectory {
+            headers = headers == null ? Map.of() : Map.copyOf(headers);
+            groupsPointer = groupsPointer == null ? "" : groupsPointer.trim();
+            prefix = prefix == null || prefix.isBlank() ? GROUP_PREFIX : prefix.trim();
         }
     }
 
@@ -152,9 +190,57 @@ public class SourceRegistry {
         for (RagProperties.SourceProperties p : configured) {
             entries.add(new Source(bareId(p.getId()), normalizeType(p.getType()), trimToNull(p.getUrl()),
                     p.getServiceUsername(), p.getServicePassword(), trimToNull(p.getLinkTemplate()),
-                    trimToNull(p.getDisplayName())));
+                    trimToNull(p.getDisplayName()), groupDirectory(p.getGroups())));
         }
         return List.copyOf(entries);
+    }
+
+    private static GroupDirectory groupDirectory(RagProperties.GroupDirectoryProperties p) {
+        if (p == null) {
+            return null;
+        }
+        return new GroupDirectory(normalizeType(p.getKind()), trimToNull(p.getPath()), p.getHeaders(),
+                p.getGroupsPointer(), trimToNull(p.getGroupField()), p.getPrefix(), p.getConnectTimeout(),
+                p.getReadTimeout());
+    }
+
+    /**
+     * A wrong group directory must stop startup rather than run without it: the source would then expand no
+     * groups, and its group-granted documents would vanish for every caller with nothing to say why.
+     */
+    private static void validateGroups(int index, Source s) {
+        GroupDirectory g = s.groups();
+        if (g == null) {
+            return;
+        }
+        String entry = "rag.sources[" + index + "] (" + s.type() + (s.id() == null ? "" : " " + s.id()) + ")";
+        if (ALFRESCO.equals(s.type()) || NUXEO.equals(s.type())) {
+            throw new IllegalStateException(entry + " sets groups, but " + s.type()
+                    + " has a built-in group resolver; remove the groups block");
+        }
+        if (!GroupDirectory.HTTP.equals(g.kind())) {
+            throw new IllegalStateException(entry + " has groups.kind '" + g.kind() + "'; the only kind is "
+                    + GroupDirectory.HTTP);
+        }
+        if (g.path() == null || !g.path().contains(GroupDirectory.USERNAME_PLACEHOLDER)) {
+            throw new IllegalStateException(entry + " has a groups.path without "
+                    + GroupDirectory.USERNAME_PLACEHOLDER + ", so every caller would get the same groups");
+        }
+        if (!g.groupsPointer().isEmpty() && !g.groupsPointer().startsWith("/")) {
+            throw new IllegalStateException(entry + " has groups.groups-pointer '" + g.groupsPointer()
+                    + "', which is not a JSON Pointer: it must be empty or start with /");
+        }
+        if (!g.prefix().startsWith(GroupDirectory.GROUP_PREFIX)) {
+            throw new IllegalStateException(entry + " has groups.prefix '" + g.prefix() + "', which must start with "
+                    + GroupDirectory.GROUP_PREFIX + ": any other name is matched as a user, not a group");
+        }
+        if (!isPositive(g.connectTimeout()) || !isPositive(g.readTimeout())) {
+            throw new IllegalStateException(entry + " needs a positive groups.connect-timeout and read-timeout");
+        }
+    }
+
+    private static boolean isPositive(Duration duration) {
+        return duration != null && !duration.isZero() && !duration.isNegative();
     }
 
     private static void validate(List<Source> sources) {
@@ -172,6 +258,7 @@ public class SourceRegistry {
                 // The bare id is the sys_racl namespace, so it must be unique across types, not only within one.
                 throw new IllegalStateException("Source id '" + s.id() + "' is configured twice in rag.sources");
             }
+            validateGroups(i, s);
             perType.merge(s.type(), 1, Integer::sum);
         }
         for (Source s : sources) {

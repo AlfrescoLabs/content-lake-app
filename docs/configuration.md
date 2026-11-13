@@ -805,10 +805,10 @@ rag:
 | `group-cache.max-size` | Entry bound on that cache. Entries are keyed by resolver (one per repository, or one per type for a resolver serving the whole type) and username |
 
 Group expansion itself is per repository, not global: `rag-service` builds one Alfresco or Nuxeo resolver per
-`rag.sources[]` entry and ships a `sharepoint` resolver. A source of any other type contributes a
-clause built from the caller's own authorities only, so its group-granted documents are retrievable by
-nobody. That is logged once per source at WARN, and the remedy is a resolver bean for that type rather than a
-setting. Cache hit-rate is exposed as `cache.gets{cache=rag.security.groups}` under `/actuator/metrics`.
+`rag.sources[]` entry, ships a `sharepoint` resolver, and builds an HTTP resolver for any other entry that sets
+a `groups` block (see [Group directory for other sources](#group-directory-for-other-sources-ragsourcesgroups)).
+A source with none of these contributes a clause built from the caller's own authorities only, so its
+group-granted documents are retrievable by nobody. That is logged once per source at WARN. Cache hit-rate is exposed as `cache.gets{cache=rag.security.groups}` under `/actuator/metrics`.
 
 ##### Repositories (`rag.sources[]`)
 
@@ -819,15 +819,58 @@ single-repository deployment.
 | Property | Meaning |
 |---|---|
 | `id` | Bare source id, the part of `cin_sourceId` after `<type>:`. May be empty while a type has one entry. With two or more entries of a type every entry must set it, and startup fails otherwise. Unique across all types, because it is the `sys_racl` namespace |
-| `type` | `alfresco` or `nuxeo` |
+| `type` | `alfresco`, `nuxeo`, or a connector plugin's own type (for example `nextcloud`). The first two get a built-in group resolver |
 | `url` | Base URL for caller login checks and group lookups |
 | `service-username` / `service-password` | Service account for group lookups. Never used to authenticate callers |
 | `link-template` | Open-in-source link for this repository. Unset: the type's template, built on this entry's `url` |
 | `display-name` | Name shown by login screens through `GET /api/rag/sources` |
+| `groups` | Group directory for a source with no built-in resolver; see below. Not allowed on `alfresco` or `nuxeo` |
 
 Environment variables bind by index: `RAG_SOURCES_0_ID`, `RAG_SOURCES_0_TYPE`, `RAG_SOURCES_0_URL`, and so
 on. Configuring the ids of a type is a pin: an indexed source of that type that is not listed is not
 searched, and is reported once at WARN.
+
+##### Group directory for other sources (`rag.sources[].groups`)
+
+A connector plugin can ingest group ACLs, but group-granted documents are only retrievable when something can
+say which groups a caller is in. For a source with no built-in resolver, the `groups` block names a directory
+that answers over HTTP with JSON, so a new connector needs configuration and no change to `rag-service`.
+
+```yaml
+rag:
+  sources:
+    - id: nc1
+      type: nextcloud
+      url: https://cloud.example.org
+      service-username: rag-reader
+      service-password: ${NC_SERVICE_PASSWORD}
+      groups:
+        kind: http
+        path: /ocs/v1.php/cloud/users/{username}/groups?format=json
+        headers:
+          OCS-APIRequest: "true"
+        groups-pointer: /ocs/data/groups
+```
+
+| Property | Meaning |
+|---|---|
+| `kind` | `http`, the only kind |
+| `path` | Path and optional query appended to the entry's `url`. Must contain `{username}`, replaced by the URL-encoded name the caller has on this source |
+| `headers` | Extra request headers. The entry's `service-username` / `service-password` are sent as Basic auth when set |
+| `groups-pointer` | JSON Pointer (RFC 6901) to the array of groups. Empty (the default) means the response itself is the array |
+| `group-field` | Field read from each array item that is an object. Unset: items must be strings |
+| `prefix` | Added to a name that does not already carry it. Default `GROUP_`, and it must start with `GROUP_`: the permission filter reads any other authority as a user name, so a group `bob` would otherwise match documents granted to the user `bob` |
+| `connect-timeout` / `read-timeout` | Default `3s` / `5s` |
+
+A 2xx with an array is the caller's groups (an empty array is a valid "no groups"). A 404 means the directory
+has no such user, so the caller keeps the source with their own authorities. Any other status, a timeout, a
+body that is not JSON, or a pointer that does not reach an array is a failure, and
+`rag.security.group-resolution-failure` decides what it costs. Startup fails on an unknown `kind`, a `path`
+without `{username}`, a `groups-pointer` that does not start with `/`, or a `prefix` without `GROUP_`.
+
+The name sent to the directory is the caller's name on this source. A source with no caller authenticator of
+its own uses the caller's fallback identity, which is the name its by-name grants already match. Only use a
+directory whose user names are the same people as the names callers sign in with.
 
 ##### Entra ID group expansion
 

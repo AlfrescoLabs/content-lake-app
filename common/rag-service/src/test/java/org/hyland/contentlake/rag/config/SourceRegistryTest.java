@@ -116,4 +116,83 @@ class SourceRegistryTest {
                     .hasMessageContaining("no url");
         }
     }
+
+    @Nested
+    class WithAGroupDirectory {
+
+        private RagProperties.SourceProperties plugin(String kind, String path) {
+            RagProperties.SourceProperties p = entry("nc1", "nextcloud", "https://cloud.example.org");
+            RagProperties.GroupDirectoryProperties groups = new RagProperties.GroupDirectoryProperties();
+            groups.setKind(kind);
+            groups.setPath(path);
+            groups.setGroupsPointer("/ocs/data/groups");
+            groups.getHeaders().put("OCS-APIRequest", "true");
+            p.setGroups(groups);
+            return p;
+        }
+
+        @Test
+        void bindsTheDirectoryOntoTheEntry() {
+            SourceRegistry registry = registry(List.of(plugin(" HTTP ", "/users/{username}/groups")), "", "");
+
+            SourceRegistry.GroupDirectory groups = registry.byId("nc1").orElseThrow().groups();
+            assertThat(groups.kind()).isEqualTo("http");
+            assertThat(groups.path()).isEqualTo("/users/{username}/groups");
+            assertThat(groups.groupsPointer()).isEqualTo("/ocs/data/groups");
+            assertThat(groups.headers()).containsEntry("OCS-APIRequest", "true");
+            assertThat(groups.prefix()).isEqualTo("GROUP_");
+        }
+
+        @Test
+        void anEntryWithoutTheBlockHasNoDirectory() {
+            SourceRegistry registry = registry(List.of(entry("fs1", "filesystem", "http://fs")), "", "");
+
+            assertThat(registry.byId("fs1").orElseThrow().groups()).isNull();
+        }
+
+        @Test
+        void refusesAnUnknownKind() {
+            assertThatThrownBy(() -> registry(List.of(plugin("ldap", "/users/{username}")), "", ""))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("rag.sources[0] (nextcloud nc1)")
+                    .hasMessageContaining("ldap");
+        }
+
+        @Test
+        void refusesAPathWithoutTheUsername() {
+            assertThatThrownBy(() -> registry(List.of(plugin("http", "/groups")), "", ""))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("{username}");
+        }
+
+        @Test
+        void refusesAPointerThatIsNotAJsonPointer() {
+            RagProperties.SourceProperties p = plugin("http", "/users/{username}");
+            p.getGroups().setGroupsPointer("ocs.data.groups");
+
+            assertThatThrownBy(() -> registry(List.of(p), "", ""))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("JSON Pointer");
+        }
+
+        @Test
+        void refusesAPrefixThatWouldTurnAGroupIntoAUser() {
+            RagProperties.SourceProperties p = plugin("http", "/users/{username}");
+            p.getGroups().setPrefix("nc_");
+
+            assertThatThrownBy(() -> registry(List.of(p), "", ""))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("GROUP_");
+        }
+
+        @Test
+        void refusesTheBlockOnATypeWithABuiltInResolver() {
+            RagProperties.SourceProperties p = plugin("http", "/users/{username}");
+            p.setType("alfresco");
+
+            assertThatThrownBy(() -> registry(List.of(p), "", ""))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("built-in group resolver");
+        }
+    }
 }
